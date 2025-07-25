@@ -1,8 +1,8 @@
 {
   "name": "aide",
   "displayName": "AIDE",
-  "publisher" : "platysonique",
-  "version": "0.1.1",
+  "publisher": "platysonique",
+  "version": "1.2.0",
   "description": "Agentic AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation.",
   "repository": {
     "type": "git",
@@ -12,17 +12,40 @@
   "engines": {
     "vscode": "^1.80.0"
   },
-  "activationEvents": ["*"],
+  "activationEvents": [
+    "*"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      { "command": "aide.speechUI",      "title": "AIDE: Speech Control"     },
-      { "command": "aide.ingestUI",      "title": "AIDE: Ingest Document"    },
-      { "command": "aide.codeReview",    "title": "AIDE: Code Review"        },
-      { "command": "aide.batchFix",      "title": "AIDE: Batch Fix"          },
-      { "command": "aide.debugGuide",    "title": "AIDE: Debug Guide"        },
-      { "command": "aide.memoryManage",  "title": "AIDE: Memory Management"  },
-      { "command": "aide.agenticIntent", "title": "AIDE: Agentic Intent"     }
+      {
+        "command": "aide.speechUI",
+        "title": "AIDE: Speech Control"
+      },
+      {
+        "command": "aide.ingestUI",
+        "title": "AIDE: Ingest Document"
+      },
+      {
+        "command": "aide.codeReview",
+        "title": "AIDE: Code Review"
+      },
+      {
+        "command": "aide.batchFix",
+        "title": "AIDE: Batch Fix"
+      },
+      {
+        "command": "aide.debugGuide",
+        "title": "AIDE: Debug Guide"
+      },
+      {
+        "command": "aide.memoryManage",
+        "title": "AIDE: Memory Management"
+      },
+      {
+        "command": "aide.agenticIntent",
+        "title": "AIDE: Agentic Intent"
+      }
     ]
   },
   "scripts": {
@@ -47,4 +70,3 @@
     "url": "https://github.com/platysonique/AIDE/issues"
   }
 }
-
