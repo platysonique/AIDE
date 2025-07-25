@@ -1,0 +1,39 @@
+# Python & Pixi virtual environment directories
+.pixi/
+.pixi-lock/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Local settings, OS junk
+.DS_Store
+Thumbs.db
+
+# User secrets, logs, runtime artifacts
+global_aide_memory.json
+privacy_prompts.json
+*.log
+
+# Node build output and modules
+node_modules/
+out/
+build/dist/
+build/*.vsix
+*.egg-info/
+
+# Models directory - keep directory, ignore contents except placeholder
+models/*
+!models/.gitkeep
+!models/README.md
+
+# Extension/package manager lock files (optional for those you DON’T want in git)
+package-lock.json
+npm-debug.log
+.yarn/
+pnpm-lock.yaml
+
+# VSCode/Codium workspace settings (optional)
+.vscode/
+.history/
+

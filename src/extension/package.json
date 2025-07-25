@@ -1,0 +1,35 @@
+{
+  "name": "aide-codium",
+  "displayName": "AIDE",
+  "version": "0.1.1",
+  "engines": { "vscode": "^1.80.0" },
+  "activationEvents": ["*"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "aide.speechUI",      "title": "AIDE: Speech Control"     },
+      { "command": "aide.ingestUI",      "title": "AIDE: Ingest Document"    },
+      { "command": "aide.codeReview",    "title": "AIDE: Code Review"        },
+      { "command": "aide.batchFix",      "title": "AIDE: Batch Fix"          },
+      { "command": "aide.debugGuide",    "title": "AIDE: Debug Guide"        },
+      { "command": "aide.memoryManage",  "title": "AIDE: Memory Management"  },
+      { "command": "aide.agenticIntent", "title": "AIDE: Agentic Intent"     }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "bundle":  "webpack --mode production"
+  },
+  "devDependencies": {
+    "@types/vscode":     "^1.80.0",
+    "@types/node-fetch": "^2.6.2",
+    "ts-loader":         "^9.0.0",
+    "typescript":        "^5.3.0",
+    "webpack":           "^5.0.0",
+    "webpack-cli":       "^4.0.0"
+  },
+  "dependencies": {
+    "node-fetch":            "^2.6.0",
+    "vscode-languageclient": "^7.0.0"
+  }
+}
