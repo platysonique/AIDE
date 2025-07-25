@@ -1,8 +1,17 @@
 {
-  "name": "aide-codium",
+  "name": "aide",
   "displayName": "AIDE",
+  "publisher" : "platysonique",
   "version": "0.1.1",
-  "engines": { "vscode": "^1.80.0" },
+  "description": "Agentic AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/platysonique/AIDE.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
   "activationEvents": ["*"],
   "main": "./out/extension.js",
   "contributes": {
@@ -18,18 +27,24 @@
   },
   "scripts": {
     "compile": "tsc -p .",
-    "bundle":  "webpack --mode production"
+    "bundle": "webpack --mode production"
   },
   "devDependencies": {
-    "@types/vscode":     "^1.80.0",
+    "@types/vscode": "^1.80.0",
     "@types/node-fetch": "^2.6.2",
-    "ts-loader":         "^9.0.0",
-    "typescript":        "^5.3.0",
-    "webpack":           "^5.0.0",
-    "webpack-cli":       "^4.0.0"
+    "ts-loader": "^9.0.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.0.0",
+    "webpack-cli": "^4.0.0",
+    "@vscode/vsce": "^2.23.0"
   },
   "dependencies": {
-    "node-fetch":            "^2.6.0",
+    "node-fetch": "^2.6.0",
     "vscode-languageclient": "^7.0.0"
+  },
+  "homepage": "https://github.com/platysonique/AIDE",
+  "bugs": {
+    "url": "https://github.com/platysonique/AIDE/issues"
   }
 }
+

@@ -8,12 +8,13 @@ export function initIngestUI(context: vscode.ExtensionContext): void {
         canSelectMany: false
       });
 
-      if (uri && uri[^0]) {
+      if (uri && uri[0]) {
         vscode.window.showInformationMessage(
-          `Document selected for ingest: ${uri[^0].fsPath}`
+          `Document selected for ingest: ${uri[0].fsPath}`
         );
         // Actual implementation: send to backend ingest endpoint
       }
     })
   );
 }
+
