@@ -8,8 +8,8 @@ def surface_errors(payload):
         for i, line in enumerate(tb_lines):
             if line.strip().startswith("File"):
                 parts = line.strip().split(',')
-                fname = parts[^0].split('"')[-2] if '"' in parts[^0] else parts[^0]
-                lineno = parts[^1].strip().split(' ')[-1]
+                fname = parts[-1].split('"')[-2] if '"' in parts[-1] else parts[-1]
+                lineno = parts[-1].strip().split(' ')[-1]
                 err_line = tb_lines[i+1].strip() if i+1 < len(tb_lines) else ""
                 errors.append({
                     "type": "Exception",

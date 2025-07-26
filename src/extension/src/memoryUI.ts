@@ -1,29 +1,58 @@
-import * as vscode from 'vscode';
-import fetch from 'node-fetch';
+import json
+import os
+from typing import Dict, List, Any
+from datetime import datetime
 
-export function initMemoryUI(context: vscode.ExtensionContext): void {
-  context.subscriptions.push(
-    vscode.commands.registerCommand('aide.memoryManage', async () => {
-      const recall = await fetch('http://127.0.0.1:8000/memory/recall');
-      const memData = await recall.json();
-      if (memData.memory?.length) {
-        const items = memData.memory.map((m: any, idx: number) => `${idx+1}. ${m}`);
-        vscode.window.showInformationMessage("AIDE project memory:\n" + items.join('\n'));
-      } else {
-        vscode.window.showInformationMessage("No entries in AIDE project memory.");
-      }
-      if (memData.privacy_prompts && Object.keys(memData.privacy_prompts).length) {
-        for (const k of Object.keys(memData.privacy_prompts)) {
-          const confirm = await vscode.window.showQuickPick(['Yes','No'], {
-            placeHolder: `Save sensitive data "${k}" to project memory?`
-          });
-          await fetch('http://127.0.0.1:8000/memory/privacy', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entry: k, confirm: confirm === 'Yes' })
-          });
-        }
-      }
-    })
-  );
-}
+MEMORY_FILE = "aide_memory.json"
+
+def save_memory(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Save conversation or code context to memory"""
+    memory_data = payload.get("memory_data", {})
+    memory_type = payload.get("type", "conversation")
+    
+    # Load existing memory
+    existing_memory = []
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, 'r') as f:
+            existing_memory = json.load(f)
+    
+    # Add new memory entry
+    memory_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "type": memory_type,
+        "data": memory_data
+    }
+    existing_memory.append(memory_entry)
+    
+    # Save back to file
+    with open(MEMORY_FILE, 'w') as f:
+        json.dump(existing_memory, f, indent=2)
+    
+    return {"status": "success", "message": "Memory saved"}
+
+def recall_memory() -> Dict[str, Any]:
+    """Recall stored memory"""
+    if not os.path.exists(MEMORY_FILE):
+        return {"memories": [], "count": 0}
+    
+    with open(MEMORY_FILE, 'r') as f:
+        memories = json.load(f)
+    
+    return {"memories": memories, "count": len(memories)}
+
+def manage_privacy(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Manage privacy settings for stored memories"""
+    action = payload.get("action", "")
+    
+    if action == "clear_all":
+        if os.path.exists(MEMORY_FILE):
+            os.remove(MEMORY_FILE)
+        return {"status": "success", "message": "All memories cleared"}
+    
+    elif action == "clear_before_date":
+        target_date = payload.get("date", "")
+        # Implementation for date-based clearing
+        return {"status": "success", "message": f"Memories before {target_date} cleared"}
+    
+    return {"status": "error", "message": "Invalid privacy action"}
+

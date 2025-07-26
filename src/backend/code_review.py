@@ -60,3 +60,53 @@ def review_code(payload: Dict[str, Any]) -> Dict[str, Any]:
         })
 
     return {"results": results}
+
+def batch_fix(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply automatic fixes to code issues found during review"""
+    files: List[Dict[str, str]] = payload.get("files", [])
+    fixes_applied = []
+    
+    for file_entry in files:
+        filename = file_entry.get("filename", "")
+        code = file_entry.get("content", "")
+        
+        # Remove tab characters (convert to spaces)
+        if "\t" in code:
+            fixed_code = code.replace("\t", "    ")  # Convert tabs to 4 spaces
+            fixes_applied.append({
+                "file": filename,
+                "fix": "Converted tabs to spaces",
+                "line": "all"
+            })
+            file_entry["content"] = fixed_code
+    
+    return {
+        "status": "success",
+        "fixes_applied": fixes_applied,
+        "files": files
+    }
+
+def batch_fix(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply automatic fixes to code issues found during review"""
+    files: List[Dict[str, str]] = payload.get("files", [])
+    fixes_applied = []
+    
+    for file_entry in files:
+        filename = file_entry.get("filename", "")
+        code = file_entry.get("content", "")
+        
+        # Remove tab characters (convert to spaces)
+        if "\t" in code:
+            fixed_code = code.replace("\t", "    ")  # Convert tabs to 4 spaces
+            fixes_applied.append({
+                "file": filename,
+                "fix": "Converted tabs to spaces",
+                "line": "all"
+            })
+            file_entry["content"] = fixed_code
+    
+    return {
+        "status": "success",
+        "fixes_applied": fixes_applied,
+        "files": files
+    }
