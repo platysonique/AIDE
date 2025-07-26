@@ -2,7 +2,7 @@
   "name": "aide",
   "displayName": "AIDE",
   "publisher": "platysonique",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Agentic AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation.",
   "repository": {
     "type": "git",
@@ -45,8 +45,29 @@
       {
         "command": "aide.agenticIntent",
         "title": "AIDE: Agentic Intent"
+      },
+      {
+        "command": "aide.openChat",
+        "title": "AIDE: Open Chat Panel"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aideChatContainer",
+          "title": "AIDE",
+          "icon": "media/aide-icon.png"
+        }
+      ]
+    },
+    "views": {
+      "aideChatContainer": [
+        {
+          "id": "aide.chatView",
+          "name": "AIDE Chat"
+        }
+      ]
+    }
   },
   "scripts": {
     "compile": "tsc -p .",
