@@ -2,7 +2,7 @@
   "name": "aide",
   "displayName": "AIDE",
   "publisher": "platysonique",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Agentic AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation.",
   "repository": {
     "type": "git",
