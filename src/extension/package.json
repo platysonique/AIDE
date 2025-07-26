@@ -2,7 +2,7 @@
   "name": "aide",
   "displayName": "AIDE - AI Development Environment",
   "publisher": "platysonique",
-  "version": "1.2.9",
+  "version": "1.3.0",
   "description": "Intent-driven AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation featuring Intent \u2192 Tool \u2192 Execution pipeline.",
   "repository": {
     "type": "git",
@@ -12,43 +12,65 @@
   "engines": {
     "vscode": "^1.80.0"
   },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Education"
+  ],
+  "keywords": [
+    "ai",
+    "assistant",
+    "automation",
+    "intent",
+    "tools",
+    "intel-arc",
+    "deepseek"
+  ],
   "activationEvents": [
-    "*"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "aide.speechUI",
-        "title": "AIDE: Speech Control"
+        "title": "AIDE: Speech Control",
+        "icon": "$(mic)"
       },
       {
         "command": "aide.ingestUI",
-        "title": "AIDE: Ingest Document"
+        "title": "AIDE: Ingest Document",
+        "icon": "$(file-add)"
       },
       {
         "command": "aide.codeReview",
-        "title": "AIDE: Code Review"
+        "title": "AIDE: Code Review",
+        "icon": "$(search)"
       },
       {
         "command": "aide.batchFix",
-        "title": "AIDE: Batch Fix"
+        "title": "AIDE: Batch Fix",
+        "icon": "$(tools)"
       },
       {
         "command": "aide.debugGuide",
-        "title": "AIDE: Debug Guide"
+        "title": "AIDE: Debug Guide",
+        "icon": "$(bug)"
       },
       {
         "command": "aide.memoryManage",
-        "title": "AIDE: Memory Management"
+        "title": "AIDE: Memory Management",
+        "icon": "$(database)"
       },
       {
         "command": "aide.agenticIntent",
-        "title": "AIDE: Agentic Intent"
+        "title": "AIDE: Agentic Intent",
+        "icon": "$(zap)"
       },
       {
         "command": "aide.openChat",
-        "title": "AIDE: Open Chat Panel"
+        "title": "AIDE: Open Chat Panel",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "aide.executeIntent",
@@ -59,6 +81,11 @@
         "command": "aide.clearChat",
         "title": "AIDE: Clear Chat",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "aide.refreshTools",
+        "title": "AIDE: Refresh Tools",
+        "icon": "$(refresh)"
       }
     ],
     "viewsContainers": {
@@ -74,11 +101,13 @@
       "aideChatContainer": [
         {
           "id": "aide.chatView",
-          "name": "AIDE Chat"
+          "name": "AIDE Chat",
+          "type": "webview"
         },
         {
           "id": "aide.intentView",
-          "name": "Intent Pipeline"
+          "name": "Available Tools",
+          "type": "webview"
         }
       ]
     },
@@ -93,29 +122,70 @@
           "command": "aide.executeIntent",
           "when": "view == aide.intentView",
           "group": "navigation"
+        },
+        {
+          "command": "aide.refreshTools",
+          "when": "view == aide.intentView",
+          "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "AIDE Configuration",
+      "properties": {
+        "aide.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "AIDE backend server URL"
+        },
+        "aide.intentEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Intent \u2192 Tool \u2192 Execution pipeline"
+        },
+        "aide.autoFix": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically apply fixes when possible"
+        },
+        "aide.confidenceThreshold": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Minimum confidence threshold for intent execution"
+        }
+      }
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p .",
-    "bundle": "webpack --mode production"
+    "bundle": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "package": "vsce package --out aide.vsix"
   },
   "devDependencies": {
     "@types/vscode": "^1.80.0",
+    "@types/node": "^18.x",
     "@types/node-fetch": "^2.6.2",
-    "ts-loader": "^9.0.0",
+    "ts-loader": "^9.4.0",
     "typescript": "^5.3.0",
-    "webpack": "^5.0.0",
-    "webpack-cli": "^4.0.0",
+    "webpack": "^5.88.0",
+    "webpack-cli": "^5.1.0",
     "@vscode/vsce": "^2.23.0"
   },
   "dependencies": {
-    "node-fetch": "^2.6.0",
-    "vscode-languageclient": "^7.0.0"
+    "node-fetch": "^2.6.12",
+    "vscode-languageclient": "^9.0.1"
   },
   "homepage": "https://github.com/platysonique/AIDE",
   "bugs": {
     "url": "https://github.com/platysonique/AIDE/issues"
+  },
+  "icon": "media/aide-icon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
   }
 }
