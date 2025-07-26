@@ -2,7 +2,7 @@
   "name": "aide",
   "displayName": "AIDE - AI Development Environment",
   "publisher": "platysonique",
-  "version": "1.3.1",
+  "version": "1.3.",
   "description": "Intent-driven AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation featuring Intent \u2192 Tool \u2192 Execution pipeline.",
   "repository": {
     "type": "git",
