@@ -1,9 +1,9 @@
 {
   "name": "aide",
-  "displayName": "AIDE",
+  "displayName": "AIDE - AI Development Environment",
   "publisher": "platysonique",
-  "version": "1.2.8",
-  "description": "Agentic AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation.",
+  "version": "1.2.9",
+  "description": "Intent-driven AI assistant for VSCodium/VSCode with Intel Arc XPU acceleration, offline/hybrid search, and developer automation featuring Intent \u2192 Tool \u2192 Execution pipeline.",
   "repository": {
     "type": "git",
     "url": "https://github.com/platysonique/AIDE.git"
@@ -49,14 +49,24 @@
       {
         "command": "aide.openChat",
         "title": "AIDE: Open Chat Panel"
+      },
+      {
+        "command": "aide.executeIntent",
+        "title": "AIDE: Execute Intent \u2192 Tool \u2192 Action",
+        "icon": "$(play)"
+      },
+      {
+        "command": "aide.clearChat",
+        "title": "AIDE: Clear Chat",
+        "icon": "$(clear-all)"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "aideChatContainer",
-          "title": "AIDE",
-          "icon": "media/aide-icon.png"
+          "title": "AIDE Assistant",
+          "icon": "$(robot)"
         }
       ]
     },
@@ -65,6 +75,24 @@
         {
           "id": "aide.chatView",
           "name": "AIDE Chat"
+        },
+        {
+          "id": "aide.intentView",
+          "name": "Intent Pipeline"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "aide.clearChat",
+          "when": "view == aide.chatView",
+          "group": "navigation"
+        },
+        {
+          "command": "aide.executeIntent",
+          "when": "view == aide.intentView",
+          "group": "navigation"
         }
       ]
     }
