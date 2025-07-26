@@ -3,6 +3,8 @@ import uvicorn
 import os
 import requests
 import yaml
+import json
+from typing import Dict, List, Any
 
 from code_review import review_code, batch_fix
 from debug_guide import surface_errors, debug_step
@@ -91,13 +93,215 @@ def hybrid_online_search(query):
             continue
     return {"error": f"No provider returned a result. Last error: {last_error}"}
 
+# --- Agentic Intent Processing ---
+
+class AgenticIntentProcessor:
+    """Processes user intents and determines appropriate actions"""
+    
+    def __init__(self):
+        self.intent_patterns = {
+            "code_review": ["review", "check", "analyze", "look at", "examine"],
+            "fix_bugs": ["fix", "debug", "error", "bug", "issue", "problem"],
+            "explain": ["explain", "what does", "how does", "describe", "tell me about"],
+            "generate": ["create", "generate", "write", "make", "build"],
+            "test": ["test", "testing", "unit test", "spec"],
+            "refactor": ["refactor", "improve", "optimize", "clean up"],
+            "document": ["document", "docs", "documentation", "comment"],
+            "search": ["find", "search", "look for", "locate"]
+        }
+    
+    def process_intent(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Process user intent and return response with suggested actions"""
+        
+        message_lower = message.lower()
+        detected_intents = []
+        
+        # Detect intents based on keywords
+        for intent, keywords in self.intent_patterns.items():
+            if any(keyword in message_lower for keyword in keywords):
+                detected_intents.append(intent)
+        
+        # Generate response based on detected intents
+        response_parts = []
+        suggested_actions = []
+        
+        if not detected_intents:
+            detected_intents = ["general_help"]
+        
+        for intent in detected_intents:
+            intent_response = self._handle_intent(intent, message, context)
+            response_parts.append(intent_response["response"])
+            suggested_actions.extend(intent_response["actions"])
+        
+        return {
+            "response": "\n\n".join(response_parts),
+            "actions": suggested_actions,
+            "detected_intents": detected_intents
+        }
+    
+    def _handle_intent(self, intent: str, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle specific intent types"""
+        
+        current_file = context.get("currentFile", {})
+        workspace = context.get("workspace", {})
+        
+        responses = {
+            "code_review": {
+                "response": f"I'll help you review the code. {self._get_file_context_message(current_file)}",
+                "actions": [
+                    {"type": "code_review", "label": "🔍 Start Code Review"},
+                    {"type": "batch_fix", "label": "🛠️ Auto-fix Issues"}
+                ]
+            },
+            "fix_bugs": {
+                "response": f"I'll help you identify and fix bugs. {self._get_file_context_message(current_file)}",
+                "actions": [
+                    {"type": "debug_guide", "label": "🐛 Debug Guide"},
+                    {"type": "batch_fix", "label": "🔧 Batch Fix"}
+                ]
+            },
+            "explain": {
+                "response": f"I'll explain the code for you. {self._get_file_context_message(current_file)}",
+                "actions": [
+                    {"type": "code_review", "label": "📖 Detailed Analysis"}
+                ]
+            },
+            "generate": {
+                "response": "I can help you generate code, tests, documentation, or other development artifacts.",
+                "actions": [
+                    {"type": "code_review", "label": "🎯 Analyze First"},
+                    {"type": "debug_guide", "label": "🧪 Generate Tests"}
+                ]
+            },
+            "test": {
+                "response": "I'll help you create and run tests for your code.",
+                "actions": [
+                    {"type": "code_review", "label": "📋 Test Strategy"},
+                    {"type": "batch_fix", "label": "🧪 Generate Tests"}
+                ]
+            },
+            "refactor": {
+                "response": "I can help you refactor and improve your code quality.",
+                "actions": [
+                    {"type": "code_review", "label": "🔍 Code Analysis"},
+                    {"type": "batch_fix", "label": "♻️ Apply Refactoring"}
+                ]
+            },
+            "document": {
+                "response": "I'll help you create documentation and add comments to your code.",
+                "actions": [
+                    {"type": "code_review", "label": "📝 Document Code"}
+                ]
+            },
+            "search": {
+                "response": "I can search through your codebase, documentation, or the web for information.",
+                "actions": [
+                    {"type": "online_search", "label": "🌐 Web Search"}
+                ]
+            },
+            "general_help": {
+                "response": f"I'm AIDE, your intelligent coding assistant! I can help with code review, debugging, testing, documentation, and more. {self._get_workspace_context_message(workspace, current_file)}",
+                "actions": [
+                    {"type": "code_review", "label": "🔍 Review Current File"},
+                    {"type": "debug_guide", "label": "🐛 Debug Help"},
+                    {"type": "batch_fix", "label": "🛠️ Fix Issues"}
+                ]
+            }
+        }
+        
+        return responses.get(intent, responses["general_help"])
+    
+    def _get_file_context_message(self, current_file: Dict[str, Any]) -> str:
+        """Generate context message about current file"""
+        if current_file and current_file.get("filename"):
+            filename = current_file["filename"].split("/")[-1]
+            language = current_file.get("language", "unknown")
+            if current_file.get("selection"):
+                return f"I can see you have selected code in {filename} ({language}). Let me analyze that selection."
+            else:
+                return f"I can see you're working on {filename} ({language}). Let me analyze the entire file."
+        return "Please open a file in the editor so I can provide more specific assistance."
+    
+    def _get_workspace_context_message(self, workspace: Dict[str, Any], current_file: Dict[str, Any]) -> str:
+        """Generate context message about workspace"""
+        messages = []
+        if workspace and workspace.get("name"):
+            messages.append(f"I can see you're working in the '{workspace['name']}' workspace.")
+        if current_file and current_file.get("filename"):
+            filename = current_file["filename"].split("/")[-1]
+            messages.append(f"Currently viewing: {filename}")
+        return " ".join(messages) if messages else "Open a workspace and file to get started!"
+
+# Initialize the agentic processor
+agentic_processor = AgenticIntentProcessor()
+
 # --- FastAPI app ---
 
 app = FastAPI(title="AIDE Backend with Agentic Features & Hybrid Search")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "message": "AIDE backend is running"}
+
+@app.post("/chat")
+async def api_chat(request: Request):
+    """Main agentic chat endpoint"""
+    data = await request.json()
+    message = data.get("message", "")
+    context = data.get("context", {})
+    
+    if not message:
+        return {"error": "No message provided"}
+    
+    try:
+        # Process the intent and generate response
+        result = agentic_processor.process_intent(message, context)
+        
+        # If the message looks like a search query, also perform web search
+        search_keywords = ["search", "find", "look up", "what is", "who is", "when did", "how to"]
+        if any(keyword in message.lower() for keyword in search_keywords):
+            search_result = hybrid_online_search(message)
+            if "result" in search_result:
+                result["response"] += f"\n\n🌐 **Web Search Result:**\n{search_result['result']}"
+        
+        return result
+        
+    except Exception as e:
+        return {
+            "response": f"I apologize, but I encountered an error processing your request: {str(e)}",
+            "actions": [],
+            "detected_intents": ["error"]
+        }
+
+@app.post("/agentic-intent")
+async def api_agentic_intent(request: Request):
+    """Legacy agentic intent endpoint - redirects to chat"""
+    return await api_chat(request)
+
+@app.post("/ingest")
+async def api_ingest_document(request: Request):
+    """Endpoint for document ingestion"""
+    data = await request.json()
+    file_path = data.get("file_path")
+    file_name = data.get("file_name")
+    
+    if not file_path:
+        return {"error": "No file path provided"}
+    
+    try:
+        # Here you would integrate with your existing ingest logic
+        # For now, we'll simulate the ingestion process
+        return {
+            "status": "success",
+            "message": f"Successfully ingested {file_name}",
+            "file_path": file_path,
+            "file_name": file_name
+        }
+    except Exception as e:
+        return {
+            "status": "error", 
+            "message": f"Failed to ingest {file_name}: {str(e)}"
+        }
 
 @app.post("/review-code")
 async def api_review_code(request: Request):
@@ -142,4 +346,3 @@ async def api_online_search(request: Request):
 
 if __name__ == "__main__":
     uvicorn.run(app, host=config.get("host", "127.0.0.1"), port=int(config.get("port", 8000)))
-

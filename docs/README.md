@@ -1,32 +1,34 @@
-# AIDE for Codium — Comprehensive README (Pixi \& DeepSeek R1 7B Qwen Edition)
+
+# 1. README.md
 
 **Agentic AI for VSCodium/VSCode—built for the Intel Arc community, free for all.**
 
 ## 🚀 What Is AIDE?
 
-AIDE is an open-source, privacy-first AI companion for Codium/VSCode. It delivers code review, document ingestion, hybrid web/local search, GPU acceleration, speech input, and more—with no Conda or manual complexity. If you use it, please credit **platysonique**.
+AIDE is an open-source, privacy-first AI companion for Codium/VSCode. It delivers code review, document ingestion, hybrid web/local search, GPU acceleration, speech input, and more—all with no Conda or manual complexity. If you use it, please credit **platysonique**.
 
 ## ✨ Features
 
 - **Intelligent Coding Assistant:** Instant help and proactive suggestions.
 - **GPU Acceleration:** Optimized for Intel Arc, with CPU fallback.
 - **Offline-First:** Features run locally; online search is opt-in.
-- **Easy Hybrid Search:** Out-of-the-box support for Perplexity, DuckDuckGo, Wikipedia, Wolfram Alpha, Open-Meteo—no local search engines needed.
+- **Easy Search Integration:** Hybrid search from Perplexity, DuckDuckGo, Wikipedia, Wolfram Alpha, Open-Meteo—no local search engines needed.
 - **Speech \& Document UI:** Use your voice or upload documents at any time.
-- **Robust Code Review \& Debugging:** Automated fixes and guided debugging.
-- **Community Driven:** Free to use, extend, or remix—just mention platysonique!
+- **Reliable Code Review \& Debugging:** Automated fixes and guided debugging.
+- **For the Community:** Free to use, extend, or remix—just mention platysonique!
 
 
 ## 🛠 Prerequisites
 
+Install these before continuing:
+
 - **Node.js** (v20+)
 - **npm**
-- **TypeScript** (`npm install -g typescript`)
+- **TypeScript** (install globally: `npm install -g typescript`)
 - **Pixi** (Python package/env manager)
-- **Python** (>=3.9, <3.12; managed by Pixi)
+- **Python** (>=3.9, <3.12; Pixi manages this)
 
-
-### Quick Install (Linux/macOS)
+**Quick install (Linux/macOS):**
 
 ```sh
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -37,159 +39,93 @@ curl -fsSL https://pixi.sh/install.sh | bash
 
 *For Windows, see each tool's official guides.*
 
-## 📂 Project Structure
+## 📦 How to Set Up \& Build
 
-```
-aide-codium-extension/
-├── build/
-│   └── bundle.sh
-├── docs/
-│   └── README.md                # ← This file
-├── scripts/
-│   ├── scaffold.sh
-│   ├── setup.sh
-│   └── create_extension.sh
-├── src/
-│   ├── extension/
-│   ├── backend/
-│   └── ingest/
-├── models/
-├── pixi.toml
-├── pixi.lock
-```
-
-
-## ⚙️ Setup \& Build Instructions
-
-For maintainability and debugging, setup uses clearly separated scripts.
-
-### 1. Scaffold the Project
+1. **Clone the repository:**
 
 ```sh
-bash scaffold.sh
-mv scaffold.sh scripts/
-mv setup.sh scripts/
-mv create_extension.sh scripts/
+git clone https://github.com/platysonique/AIDE.git
+cd AIDE
 ```
 
-*Always run subsequent scripts from `scripts/`.*
+2. **Configure AIDE (Important!):**
 
-### 2. Environment Setup
+Edit `src/backend/config.yaml` *before* installing:
+    - Set your search order (`online_search`, `fallback_order`) with options like perplexity, duckduckgo, wikipedia, wolframalpha, open-meteo.
+    - Add any API keys or AppIDs required.
+    - No need to host your own search engine—everything works out of the box with these public/free APIs.
+3. **Install and Build:**
 
 ```sh
-bash scripts/setup.sh
+bash scripts/setup.sh                 # Python environment via Pixi
+cd src/extension
+npm install --legacy-peer-deps        # Installs node modules for build
+npm run bundle                        # Builds the extension
+npx vsce package --out aide.vsix      # Creates the VSIX installer
 ```
 
-- Sets up the Pixi environment and all Python dependencies.
-- Optionally checks for Intel GPU drivers if on Linux.
-- Validates project files and prerequisites.
-
-
-### 3. Build \& Package the Extension
+4. **Install the Extension:**
+    - In Codium/VSCode: Extensions sidebar → (…) menu → “Install from VSIX…” → select `aide.vsix`
+    - Or via terminal:
 
 ```sh
-bash scripts/create_extension.sh
+codium --install-extension build/aide.vsix
+# or
+code --install-extension build/aide.vsix
 ```
 
-- Installs Node.js dependencies.
-- Compiles TypeScript sources.
-- Bundles the extension (Webpack).
-- Packages extension as `.vsix` with `vsce` (installs globally if missing).
-
-
-### 4. Install the Extension
-
-**In VSCodium:**
-
-```sh
-codium --install-extension build/dist/aide-codium.vsix --force
-```
-
-**In VS Code:**
-
-```sh
-code --install-extension build/dist/aide-codium.vsix --force
-```
-
-Run both if you use both editors.
-
-### 5. Place Model Files
-
-Copy your DeepSeek R1 7B Qwen model files into the `models/` directory.
-
-- For multi-model support, modify the `model:` path in `src/backend/config.yaml`.
-
-
-### 6. Activate Environment, Launch Backend
-
-To open a Pixi dev shell:
+5. **Start Using AIDE:**
+    - If backend is not running, launch:
 
 ```sh
 pixi shell
-```
-
-To run the backend directly:
-
-```sh
 pixi run python src/backend/api.py
 ```
 
+    - Launch AIDE features from the command palette inside Codium/VSCode (“AIDE: …”).
 
 ## 🔍 Search Features (No Extra Installs Required)
 
-- **APIs included:** Perplexity, DuckDuckGo, Wikipedia, Wolfram Alpha, Open-Meteo (all via public APIs).
+- **APIs included:** Perplexity, DuckDuckGo, Wikipedia, Wolfram Alpha, Open-Meteo (all via free/public APIs—just paste keys as needed in `config.yaml`).
 - **No SearxNG or other local search servers required!**
-- **Flexible priority:** Set order and specify API keys in `src/backend/config.yaml`.
-- **Automatic fallback:** If one search fails, AIDE moves to the next.
+- **Flexible order:** Control priority/redundancy in `config.yaml`.
+- **Automatic fallback:** If the first search fails, AIDE automatically moves to the next.
 
-
-## 📜 System Features Overview
-
-| Feature | Description | Offline/Hybrid |
-| :-- | :-- | :-- |
-| Large Language Model | DeepSeek R1 7B Qwen local model | Offline |
-| Retrieval Augmented Gen. | Local Qdrant/ChromaDB indexed search | Offline |
-| Speech-to-Text (STT) | Whisper and Vosk with Intel GPU acceleration | Offline |
-| Text-to-Speech (TTS) | Coqui TTS and Chatterbox | Offline |
-| Online Search | Perplexity, DuckDuckGo, Wikipedia, Wolfram Alpha, Open-Meteo | Hybrid (opt-in) |
-| Code Review / Fix | AI-powered code insight and automated fixes | Offline/Hybrid |
-| Debug Guide | Conversational, context-based debugging | Hybrid |
-| Document Ingestion | PDF, EPUB, TXT, MD, DOCX, JPG, PNG support | Offline |
-| GPU Utilization | Intel oneAPI, PyTorch-XPU for Arc A770 | Offline |
-| Backend Launch | Pixi environment-managed backend process | Offline |
 
 ## 🙌 Use Policy, Credit, and Community
 
 - **Free for everyone.**
-- If AIDE powers your project (commercial/hobby), just credit **platysonique** (e.g., “Built with AIDE by platysonique”).
-- **Do NOT** resell, redistribute, or bundle AIDE itself (standalone or embedded) in other products.
-- Commercial projects using AIDE as a tool/aid are welcome—credit is all that's needed!
-- To redistribute, embed, or sell AIDE itself, **contact platysonique for licensing.**
-- Want to show support? Buy a coffee or a “lambo”: Cash App \$thereisnofork.
+- If you use AIDE as a tool or underpinning for any project (commercial or otherwise), just credit **platysonique** (e.g., “Built with AIDE by platysonique”).
+- **Do NOT** resell, redistribute, or bundle AIDE itself as a standalone or embedded component within another product, commercial or otherwise.
+- Commercial projects that use AIDE as a development or automation aide/tool are welcome—credit is all that’s needed!
+- Want to show support?
+**Buy me a coffee or a “lambo” via Cash App: \$thereisnofork**. Thank you!
 
 
 ## 💡 Helpful Q\&A
 
-- **Do I need a local search server?**
-No! All APIs are included—just paste keys in `config.yaml` as needed.
-- **Where do my search keys go?**
-`src/backend/config.yaml`, under the relevant fields.
-- **Can I use AIDE in a commercial project I build?**
-Absolutely! If AIDE is playing a supporting (aide) role—not distributed directly—just mention "Built with AIDE by platysonique."
-- **Can I sell or bundle AIDE itself?**
-No. If you want to redistribute, embed, or sell AIDE (standalone/component), contact platysonique for a fair license.
-- **My company wants to embed AIDE in a product. How do we proceed?**
-Contact for licensing. This ensures AIDE stays free and improving for all!
+**Q: Do I need a local search server?**
+A: No! All free APIs are included—just paste keys where needed.
 
+**Q: Where do my search keys go?**
+A: `src/backend/config.yaml`, under the appropriately labeled fields.
+
+**Q: Can I use AIDE in a commercial project I build?**
+A: Absolutely! As long as AIDE is playing a supporting (aide) role, not getting embedded or distributed on its own. Just mention “Built with AIDE by platysonique.”
+
+**Q: Can I sell or bundle AIDE itself?**
+A: No. If you want to redistribute, embed, or sell AIDE (standalone or as an embedded/packaged component), please **contact platysonique for licensing**. This is how we keep AIDE free for the community while giving all commercial partners a chance to do things fairly! Reach out via GitHub or project issues.
+
+**Q: What if I want my company/product to embed AIDE as part of a commercial offering?**
+A: Please get in touch to discuss a license. This ensures the project (and Intel-landia!) can keep improving for everyone.
 
 ## 📝 GitHub Repo
 
 Main home:
 [https://github.com/platysonique/AIDE.git](https://github.com/platysonique/AIDE.git)
 
-*Built by the community, for the community. Empowering coders—especially in Intel-landia—with AI that puts you first.*
+**Built by the community, for the community.
+Empowering coders—especially in Intel-landia—with AI that puts you first.**
 
-If you want to fuel new features—or buy me a latte/lambo: \$thereisnofork (Cash App). Thank you!
-
-
+*If you want to fuel the next features (or a coffee/lambo): \$thereisnofork on Cash App. Thank you!*
 
