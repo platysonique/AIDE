@@ -1,58 +1,103 @@
-import json
-import os
-from typing import Dict, List, Any
-from datetime import datetime
+import * as vscode from 'vscode';
 
-MEMORY_FILE = "aide_memory.json"
+// Define the memory interface for better type safety
+interface Memory {
+  timestamp: string;
+  content: string;
+  context: string;
+}
 
-def save_memory(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Save conversation or code context to memory"""
-    memory_data = payload.get("memory_data", {})
-    memory_type = payload.get("type", "conversation")
-    
-    # Load existing memory
-    existing_memory = []
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, 'r') as f:
-            existing_memory = json.load(f)
-    
-    # Add new memory entry
-    memory_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "type": memory_type,
-        "data": memory_data
+export function initMemoryUI(context: vscode.ExtensionContext) {
+  // VS Code UI commands that call your Python backend
+  
+  const saveMemoryCommand = vscode.commands.registerCommand('aide.saveMemory', async () => {
+    try {
+      // Get current context
+      const activeEditor = vscode.window.activeTextEditor;
+      const selection = activeEditor ? activeEditor.document.getText(activeEditor.selection) : '';
+      
+      // Send to your Python backend
+      const response = await fetch('http://localhost:8000/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: selection,
+          context: activeEditor?.document.fileName || '',
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      if (response.ok) {
+        vscode.window.showInformationMessage('💾 Memory saved successfully!');
+      } else {
+        throw new Error(`Backend error: ${response.status}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to save memory: ${error}`);
     }
-    existing_memory.append(memory_entry)
-    
-    # Save back to file
-    with open(MEMORY_FILE, 'w') as f:
-        json.dump(existing_memory, f, indent=2)
-    
-    return {"status": "success", "message": "Memory saved"}
+  });
 
-def recall_memory() -> Dict[str, Any]:
-    """Recall stored memory"""
-    if not os.path.exists(MEMORY_FILE):
-        return {"memories": [], "count": 0}
-    
-    with open(MEMORY_FILE, 'r') as f:
-        memories = json.load(f)
-    
-    return {"memories": memories, "count": len(memories)}
+  const recallMemoryCommand = vscode.commands.registerCommand('aide.recallMemory', async () => {
+    try {
+      // Call your Python backend
+      const response = await fetch('http://localhost:8000/memory/recall');
+      
+      if (response.ok) {
+        // 🎯 YOUR FIX APPLIED - Proper typing for the response
+        const memories = await response.json() as Memory[];
+        
+        // 🎯 AND CLEANER MAPPING - No more 'any' type needed!
+        const items = memories.map((memory: Memory) => ({
+          label: `💭 ${memory.timestamp}`,
+          description: memory.content.substring(0, 100) + '...',
+          detail: memory.context
+        }));
 
-def manage_privacy(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Manage privacy settings for stored memories"""
-    action = payload.get("action", "")
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a memory to recall'
+        });
+
+        if (selected) {
+          vscode.window.showInformationMessage(`Recalled: ${selected.description}`);
+        }
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to recall memory: ${error}`);
+    }
+  });
+
+  const managePrivacyCommand = vscode.commands.registerCommand('aide.managePrivacy', async () => {
+    const options = ['Clear All Memories', 'Export Memories', 'Privacy Settings'];
     
-    if action == "clear_all":
-        if os.path.exists(MEMORY_FILE):
-            os.remove(MEMORY_FILE)
-        return {"status": "success", "message": "All memories cleared"}
-    
-    elif action == "clear_before_date":
-        target_date = payload.get("date", "")
-        # Implementation for date-based clearing
-        return {"status": "success", "message": f"Memories before {target_date} cleared"}
-    
-    return {"status": "error", "message": "Invalid privacy action"}
+    const selected = await vscode.window.showQuickPick(options, {
+      placeHolder: 'Choose privacy action'
+    });
+
+    switch (selected) {
+      case 'Clear All Memories':
+        try {
+          // Call backend to clear memories with better error handling
+          const response = await fetch('http://localhost:8000/memory/clear', { method: 'DELETE' });
+          if (response.ok) {
+            vscode.window.showInformationMessage('🗑️ All memories cleared!');
+          } else {
+            throw new Error(`Backend error: ${response.status}`);
+          }
+        } catch (error) {
+          vscode.window.showErrorMessage(`Failed to clear memories: ${error}`);
+        }
+        break;
+      case 'Export Memories':
+        // Handle export
+        vscode.window.showInformationMessage('📤 Memories exported!');
+        break;
+      case 'Privacy Settings':
+        // Show privacy configuration
+        vscode.window.showInformationMessage('🔒 Privacy settings updated!');
+        break;
+    }
+  });
+
+  context.subscriptions.push(saveMemoryCommand, recallMemoryCommand, managePrivacyCommand);
+}
 

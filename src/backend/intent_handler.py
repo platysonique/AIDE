@@ -1,20 +1,20 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
-import json
-import re
 import logging
 
-# Set up logging for debugging
+# Set up logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
 
 class DiagnosticDump(BaseModel):
     message: str
     severity: int = Field(..., ge=0, le=3, description="0=Error, 1=Warning, 2=Info, 3=Hint")
     range_start: int = Field(..., ge=0)
     range_end: int = Field(..., ge=0)
+
 
 class IntentRequest(BaseModel):
     user_text: str = Field(..., min_length=1, max_length=1000)
@@ -39,6 +39,7 @@ class IntentRequest(BaseModel):
             }
         }
 
+
 class ParsedIntent(BaseModel):
     intent: str = Field(..., description="The identified intent verb_noun format")
     scope: Literal['file', 'workspace', 'selection'] = Field(..., description="Execution scope")
@@ -58,6 +59,7 @@ class ParsedIntent(BaseModel):
                 "context_hints": ["typescript", "prettier_available"]
             }
         }
+
 
 class IntentClassifier:
     """Enhanced intent classification with pattern matching and context awareness"""
@@ -245,8 +247,10 @@ class IntentClassifier:
         # Default to file scope
         return "file"
 
+
 # Initialize classifier
 classifier = IntentClassifier()
+
 
 @router.post("/intent", response_model=ParsedIntent)
 async def parse_intent(request: IntentRequest):
@@ -288,6 +292,7 @@ async def parse_intent(request: IntentRequest):
             context_hints=["error_fallback"]
         )
 
+
 @router.get("/intent/health")
 async def intent_health():
     """Health check endpoint for intent service"""
@@ -297,6 +302,7 @@ async def intent_health():
         "patterns_loaded": len(classifier.intent_patterns),
         "version": "1.0.0"
     }
+
 
 @router.get("/intent/patterns")
 async def get_intent_patterns():

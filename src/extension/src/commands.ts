@@ -43,13 +43,6 @@ export function registerCommands(context: vscode.ExtensionContext): void {
         })
     );
 
-    // Open Chat Panel command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('aide.openChat', () => {
-            vscode.commands.executeCommand('workbench.view.extension.aide-chat');
-        })
-    );
-
     // Clear Chat command
     context.subscriptions.push(
         vscode.commands.registerCommand('aide.clearChat', () => {
@@ -58,12 +51,7 @@ export function registerCommands(context: vscode.ExtensionContext): void {
         })
     );
 
-    // Existing commands with placeholder implementations
-    context.subscriptions.push(
-        vscode.commands.registerCommand('aide.codeReview', () =>
-            vscode.window.showInformationMessage('Code review in progress…')
-        )
-    );
+    // ✅ REMOVED aide.codeReview - handled by codeReviewUI.ts
 
     context.subscriptions.push(
         vscode.commands.registerCommand('aide.batchFix', () =>
@@ -71,11 +59,7 @@ export function registerCommands(context: vscode.ExtensionContext): void {
         )
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('aide.debugGuide', () =>
-            vscode.window.showInformationMessage('Starting conversational debug guide.')
-        )
-    );
+    // ✅ REMOVED aide.debugGuide - handled by debugGuideUI.ts (probably has the same issue)
 
     context.subscriptions.push(
         vscode.commands.registerCommand('aide.memoryManage', () =>
@@ -83,3 +67,4 @@ export function registerCommands(context: vscode.ExtensionContext): void {
         )
     );
 }
+
