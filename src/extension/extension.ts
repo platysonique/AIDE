@@ -31,7 +31,7 @@ interface ParsedIntent {
     auto_fix: boolean;
     tools_needed: string[];
     confidence: number;
-    context_hints?: string[]; // Made optional as suggested
+    context_hints?: string[];
 }
 
 class IntentPipeline {
@@ -46,28 +46,26 @@ class IntentPipeline {
                 throw new Error(`Backend error: ${response.status} ${response.statusText}`);
             }
 
-            // 🎯 HERE'S THE FIX - Type assertion moved to the JSON parsing line
             const result = await response.json() as ParsedIntent;
-            // Validate the response structure
             if (!result.intent || !Array.isArray(result.tools_needed)) {
                 throw new Error('Invalid response from backend');
             }
 
-            return result; // No need for type assertion here anymore
+            return result;
         } catch (error: any) {
             // Fallback response if backend is down
             return {
                 intent: 'general_help',
                 scope: 'file',
                 auto_fix: false,
-                tools_needed: ['formatter'],
-                confidence: 0.5,
+                tools_needed: ['chat', 'help_system'],
+                confidence: 0.3,
                 context_hints: ['backend_offline']
             };
         }
     }
 
-    private async discoverAndExecuteTools(toolsNeeded: string[]): Promise<number> {
+    private async discoverAndExecuteTools(toolsNeeded: string[], callback?: (message: string) => void): Promise<number> {
         const commands = await vscode.commands.getCommands(true);
         let executed = 0;
 
@@ -86,22 +84,28 @@ class IntentPipeline {
                             "I'm excellent, boss! 🔥 Ready to turn your natural language into code automation. What can I do for you?"
                         ];
                         const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-                        vscode.window.showInformationMessage(randomResponse);
+                        
+                        if (callback) {
+                            callback(`🤖 ${randomResponse}`);
+                        } else {
+                            vscode.window.showInformationMessage(randomResponse);
+                        }
                         executed++;
                         break;
 
-                    // 🔧 CODE AUTOMATION INTENTS - ENHANCED!
                     case 'formatter':
                         if (commands.includes('editor.action.formatDocument')) {
                             await vscode.commands.executeCommand('editor.action.formatDocument');
-                            vscode.window.showInformationMessage('🎯 Code formatted successfully!');
+                            const msg = '🎯 Code formatted successfully!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
                         } else if (commands.includes('prettier.forceFormatDocument')) {
                             await vscode.commands.executeCommand('prettier.forceFormatDocument');
-                            vscode.window.showInformationMessage('🎯 Prettier formatting applied!');
+                            const msg = '🎯 Prettier formatting applied!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
-                        } else {
-                            vscode.window.showWarningMessage('⚠️ No formatters found. Install Prettier or enable built-in formatter.');
                         }
                         break;
 
@@ -109,25 +113,19 @@ class IntentPipeline {
                     case 'auto_fix':
                         if (commands.includes('editor.action.fixAll')) {
                             await vscode.commands.executeCommand('editor.action.fixAll');
-                            vscode.window.showInformationMessage('🔧 Auto-fixes applied!');
+                            const msg = '🔧 Auto-fixes applied!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
-                        } else if (commands.includes('eslint.executeAutofix')) {
-                            await vscode.commands.executeCommand('eslint.executeAutofix');
-                            vscode.window.showInformationMessage('🔧 ESLint fixes applied!');
-                            executed++;
-                        } else {
-                            vscode.window.showWarningMessage('⚠️ No linters found. Install ESLint or enable built-in linting.');
                         }
                         break;
 
                     case 'indent_checker':
                         if (commands.includes('editor.action.indentLines')) {
                             await vscode.commands.executeCommand('editor.action.indentLines');
-                            vscode.window.showInformationMessage('📏 Indentation fixed!');
-                            executed++;
-                        } else if (commands.includes('editor.action.reindentlines')) {
-                            await vscode.commands.executeCommand('editor.action.reindentlines');
-                            vscode.window.showInformationMessage('📏 Re-indentation complete!');
+                            const msg = '📏 Indentation fixed!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
                         }
                         break;
@@ -135,11 +133,9 @@ class IntentPipeline {
                     case 'style_guide':
                         if (commands.includes('eslint.executeAutofix')) {
                             await vscode.commands.executeCommand('eslint.executeAutofix');
-                            vscode.window.showInformationMessage('✨ Style guide fixes applied!');
-                            executed++;
-                        } else if (commands.includes('editor.action.formatDocument')) {
-                            await vscode.commands.executeCommand('editor.action.formatDocument');
-                            vscode.window.showInformationMessage('✨ Basic style formatting applied!');
+                            const msg = '✨ Style guide fixes applied!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
                         }
                         break;
@@ -147,30 +143,25 @@ class IntentPipeline {
                     case 'test_runner':
                         if (commands.includes('test-explorer.run-all')) {
                             await vscode.commands.executeCommand('test-explorer.run-all');
-                            vscode.window.showInformationMessage('🧪 Running all tests via Test Explorer!');
+                            const msg = '🧪 Running all tests!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
                         } else if (commands.includes('npm.runTest')) {
                             await vscode.commands.executeCommand('npm.runTest');
-                            vscode.window.showInformationMessage('🧪 Running npm tests!');
+                            const msg = '🧪 Running npm tests!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
-                        } else if (commands.includes('workbench.action.tasks.runTask')) {
-                            // Try to run a generic test task
-                            await vscode.commands.executeCommand('workbench.action.tasks.runTask');
-                            vscode.window.showInformationMessage('🧪 Test task selector opened!');
-                            executed++;
-                        } else {
-                            vscode.window.showWarningMessage('⚠️ No test runners found. Configure Jest, Mocha, or npm test scripts.');
                         }
                         break;
 
                     case 'search':
                         if (commands.includes('workbench.action.findInFiles')) {
                             await vscode.commands.executeCommand('workbench.action.findInFiles');
-                            vscode.window.showInformationMessage('🔍 Search panel opened!');
-                            executed++;
-                        } else if (commands.includes('workbench.action.quickOpen')) {
-                            await vscode.commands.executeCommand('workbench.action.quickOpen');
-                            vscode.window.showInformationMessage('🔍 Quick Open activated!');
+                            const msg = '🔍 Search panel opened!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
                         }
                         break;
@@ -178,11 +169,9 @@ class IntentPipeline {
                     case 'refactor_tools':
                         if (commands.includes('editor.action.refactor')) {
                             await vscode.commands.executeCommand('editor.action.refactor');
-                            vscode.window.showInformationMessage('🔄 Refactoring menu opened!');
-                            executed++;
-                        } else if (commands.includes('editor.action.quickFix')) {
-                            await vscode.commands.executeCommand('editor.action.quickFix');
-                            vscode.window.showInformationMessage('🔄 Quick fixes available!');
+                            const msg = '🔄 Refactoring menu opened!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
                         }
                         break;
@@ -190,34 +179,33 @@ class IntentPipeline {
                     case 'diagnostics':
                         if (commands.includes('editor.action.marker.nextInFiles')) {
                             await vscode.commands.executeCommand('editor.action.marker.nextInFiles');
-                            vscode.window.showInformationMessage('🔍 Navigating to next diagnostic!');
-                            executed++;
-                        } else if (commands.includes('workbench.actions.view.problems')) {
-                            await vscode.commands.executeCommand('workbench.actions.view.problems');
-                            vscode.window.showInformationMessage('🔍 Problems panel opened!');
+                            const msg = '🔍 Navigating to next diagnostic!';
+                            if (callback) callback(msg);
+                            else vscode.window.showInformationMessage(msg);
                             executed++;
                         }
                         break;
 
                     default:
-                        // Handle unknown tools gracefully
                         console.log(`Unknown tool requested: ${tool}`);
-                        vscode.window.showInformationMessage(`🤔 I don't know how to handle "${tool}" yet, but I'm learning!`);
+                        if (callback) {
+                            callback(`🤔 I don't know how to handle "${tool}" yet, but I'm learning!`);
+                        }
                         break;
                 }
             } catch (error) {
                 console.error(`Failed to execute tool ${tool}:`, error);
-                vscode.window.showErrorMessage(`❌ Failed to execute ${tool}: ${error}`);
-                // Continue with other tools even if one fails
+                const errorMsg = `❌ Failed to execute ${tool}: ${error}`;
+                if (callback) callback(errorMsg);
+                else vscode.window.showErrorMessage(errorMsg);
             }
         }
 
         return executed;
     }
 
-    async executeIntent(userText: string): Promise<void> {
+    async executeIntent(userText: string, callback?: (message: string) => void): Promise<void> {
         const activeEditor = vscode.window.activeTextEditor;
-        // Build payload for your working backend
         const payload: IntentRequest = {
             user_text: userText,
             diagnostics: activeEditor
@@ -232,54 +220,73 @@ class IntentPipeline {
             fileName: activeEditor ? activeEditor.document.fileName : ''
         };
 
-        return vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: "🎯 AIDE Intent Pipeline",
-            cancellable: false
-        }, async (progress) => {
+        if (callback) {
+            // Chat panel mode - use callback for real-time updates
             try {
-                progress.report({ increment: 20, message: "Interpreting intent..." });
-                // Call your enhanced intent interpreter
+                callback("🤔 Interpreting intent...");
                 const intent = await this.callBackend(payload);
-
-                progress.report({
-                    increment: 40,
-                    message: `Intent: ${intent.intent} (${Math.round(intent.confidence * 100)}% confidence)`
-                });
-
-                progress.report({ increment: 60, message: "Executing tools..." });
-                // Execute discovered tools
-                const executedCount = await this.discoverAndExecuteTools(intent.tools_needed);
-
-                // Auto-fix if requested
+                
+                callback(`🎯 Intent: ${intent.intent} | Confidence: ${Math.round(intent.confidence * 100)}% | Tools: ${intent.tools_needed.join(', ')}`);
+                
+                const executedCount = await this.discoverAndExecuteTools(intent.tools_needed, callback);
+                
                 if (intent.auto_fix && executedCount > 0) {
                     try {
                         await vscode.commands.executeCommand('editor.action.fixAll');
-                        progress.report({ increment: 90, message: "Applied auto-fixes..." });
+                        callback("🛠️ Applied auto-fixes");
                     } catch (error) {
-                        console.log('Auto-fix failed:', error);
+                        callback("⚠️ Auto-fix unavailable");
                     }
                 }
-
-                progress.report({ increment: 100, message: `Completed! Executed ${executedCount} tools.` });
-
-                // Show success message
-                const message = executedCount > 0
-                    ? `🎉 AIDE executed ${executedCount} tools for "${intent.intent}" with ${Math.round(intent.confidence * 100)}% confidence!`
-                    : `🤖 AIDE analyzed "${intent.intent}" but no matching tools were found. Confidence: ${Math.round(intent.confidence * 100)}%`;
-
-                vscode.window.showInformationMessage(message, 'Run Another').then(selection => {
-                    if (selection === 'Run Another') {
-                        vscode.commands.executeCommand('aide.intentExecute');
-                    }
-                });
-
             } catch (error: any) {
-                progress.report({ increment: 100, message: "Failed" });
-                vscode.window.showErrorMessage(`❌ Intent pipeline failed: ${error.message}`);
-                console.error('Intent pipeline error:', error);
+                callback(`❌ Error: ${error.message || error}`);
             }
-        });
+        } else {
+            // Command palette mode - use progress notifications
+            return vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: "🎯 AIDE Intent Pipeline",
+                cancellable: false
+            }, async (progress) => {
+                try {
+                    progress.report({ increment: 20, message: "Interpreting intent..." });
+                    const intent = await this.callBackend(payload);
+
+                    progress.report({
+                        increment: 40,
+                        message: `Intent: ${intent.intent} (${Math.round(intent.confidence * 100)}% confidence)`
+                    });
+
+                    progress.report({ increment: 60, message: "Executing tools..." });
+                    const executedCount = await this.discoverAndExecuteTools(intent.tools_needed);
+
+                    if (intent.auto_fix && executedCount > 0) {
+                        try {
+                            await vscode.commands.executeCommand('editor.action.fixAll');
+                            progress.report({ increment: 90, message: "Applied auto-fixes..." });
+                        } catch (error) {
+                            console.log('Auto-fix failed:', error);
+                        }
+                    }
+
+                    progress.report({ increment: 100, message: `Completed! Executed ${executedCount} tools.` });
+
+                    const message = executedCount > 0
+                        ? `🎉 AIDE executed ${executedCount} tools for "${intent.intent}" with ${Math.round(intent.confidence * 100)}% confidence!`
+                        : `🤖 AIDE analyzed "${intent.intent}" but no matching tools were found. Confidence: ${Math.round(intent.confidence * 100)}%`;
+
+                    vscode.window.showInformationMessage(message, 'Run Another').then(selection => {
+                        if (selection === 'Run Another') {
+                            vscode.commands.executeCommand('aide.intentExecute');
+                        }
+                    });
+                } catch (error: any) {
+                    progress.report({ increment: 100, message: "Failed" });
+                    vscode.window.showErrorMessage(`❌ Intent pipeline failed: ${error.message}`);
+                    console.error('Intent pipeline error:', error);
+                }
+            });
+        }
     }
 }
 
@@ -290,41 +297,33 @@ export function activate(context: vscode.ExtensionContext) {
     console.log('🚀 AIDE Intent → Tool → Execution pipeline activating...');
     
     try {
-        // Launch backend server
         launchBackend(context);
-        
-        // Register all commands
         registerCommands(context);
-        
-        // Initialize all UI components
         initSpeechUI(context);
         initIngestUI(context);
         initCodeReviewUI(context);
         initDebugGuideUI(context);
         initMemoryUI(context);
         
-        // Initialize the chat panel (sidebar view)
+        // Initialize intent pipeline FIRST
+        pipeline = new IntentPipeline();
+
+        // 🎯 REGISTER WEBVIEW PROVIDERS IMMEDIATELY - BEFORE initChatPanel!
+        const chatProvider = new ChatWebviewProvider(context, pipeline);
+        const toolsProvider = new ToolsWebviewProvider(context);
+        
+        vscode.window.registerWebviewViewProvider('aide.chatView', chatProvider);
+        vscode.window.registerWebviewViewProvider('aide.toolsView', toolsProvider);
+        
+        // NOW initialize chat panel AFTER providers are registered
         initChatPanel(context);
         
-        // Register command to open the chat panel
         const openChatDisposable = vscode.commands.registerCommand('aide.openChat', () =>
             vscode.commands.executeCommand('workbench.view.extension.aideChatContainer')
         );
         context.subscriptions.push(openChatDisposable);
 
-        // Initialize intent pipeline
-        pipeline = new IntentPipeline();
-
-        // 🎯 WEBVIEW PROVIDER REGISTRATION - CRITICAL FOR CHAT PANEL:
-        const chatProvider = new ChatWebviewProvider(context);
-        const toolsProvider = new ToolsWebviewProvider(context);
-        
-        vscode.window.registerWebviewViewProvider('aide.chatView', chatProvider);
-        vscode.window.registerWebviewViewProvider('aide.toolsView', toolsProvider);
-
-        // Register all Intent Pipeline commands
         context.subscriptions.push(
-            // Main intent pipeline command
             vscode.commands.registerCommand('aide.intentExecute', async () => {
                 try {
                     const userInput = await vscode.window.showInputBox({
@@ -342,7 +341,6 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }),
 
-            // Quick action commands
             vscode.commands.registerCommand('aide.formatCode', async () => {
                 try {
                     await pipeline.executeIntent('format my code');
@@ -368,7 +366,6 @@ export function activate(context: vscode.ExtensionContext) {
             })
         );
 
-        // Status bar with direct access
         const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         statusBarItem.text = '$(robot) AIDE';
         statusBarItem.tooltip = 'Click to run Intent → Tool → Execution pipeline';
@@ -376,7 +373,6 @@ export function activate(context: vscode.ExtensionContext) {
         statusBarItem.show();
         context.subscriptions.push(statusBarItem);
 
-        // Show welcome message on first activation
         vscode.window.showInformationMessage(
             'AIDE is ready! Use the chat panel in the sidebar or run "AIDE: Agentic Intent" to get started.',
             'Open Chat Panel',
