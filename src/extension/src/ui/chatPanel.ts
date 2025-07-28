@@ -1,3 +1,4 @@
+import { ToolExecutor } from "../pipeline/toolExecutor";
 import * as vscode from 'vscode';
 
 export function initChatPanel(context: vscode.ExtensionContext) {
