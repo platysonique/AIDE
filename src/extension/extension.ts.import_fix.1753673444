@@ -3,14 +3,14 @@ import { IntentPipeline } from './src/pipeline/intentPipeline';
 import * as vscode from 'vscode';
 import { launchBackend } from './src/backendManager';
 import { registerCommands } from './src/commands';
-import { initSpeechUI } from './src/ui/speechUI';
-import { initIngestUI } from './src/ui/ingestUI';
-import { initCodeReviewUI } from './src/ui/codeReviewUI';
-import { initDebugGuideUI } from './src/ui/debugGuideUI';
-import { initMemoryUI } from './src/ui/memoryUI';
-import { initChatPanel } from './src/ui/chatPanel';
-import { ChatWebviewProvider } from './src/ui/chatWebviewProvider';
-import { ToolsWebviewProvider } from './src/ui/toolsWebviewProvider';
+import { initSpeechUI } from './src/speechUI';
+import { initIngestUI } from './src/ingestUI';
+import { initCodeReviewUI } from './src/codeReviewUI';
+import { initDebugGuideUI } from './src/debugGuideUI';
+import { initMemoryUI } from './src/memoryUI';
+import { initChatPanel } from './src/chatPanel';
+import { ChatWebviewProvider } from './src/chatWebviewProvider';
+import { ToolsWebviewProvider } from './src/toolsWebviewProvider';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -55,7 +55,7 @@ interface ParsedIntent {
 
 
 // Global enhanced pipeline instance
-let pipeline: IntentPipeline;
+let pipeline: UniversalIntentPipeline;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('🚀 AIDE Universal Intelligence Pipeline activating...');
