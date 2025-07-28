@@ -167,7 +167,7 @@ class Orchestrator {
 
 // Main chat panel management
 let chatPanel: vscode.WebviewPanel | undefined;
-let orchestrator: ToolExecutor | undefined;
+let orchestrator: Orchestrator | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('🚀 AIDE Intent → Tool → Execution pipeline activating...');

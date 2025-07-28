@@ -7,7 +7,7 @@ export class ChatViewProvider implements vscode.TreeDataProvider<ChatItem> {
 
     private chatHistory: ChatItem[] = [];
     private chatPanel: vscode.WebviewPanel | undefined;
-    private orchestrator: ToolExecutor;
+    private orchestrator: Orchestrator;
 
     constructor(private context: vscode.ExtensionContext) {
         this.orchestrator = new ToolExecutor();
