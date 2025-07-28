@@ -2,7 +2,7 @@
   "name": "aide",
   "displayName": "AIDE - Intent Pipeline",
   "publisher": "platysonique",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Intent \u2192 Tool \u2192 Execution pipeline for natural language development automation",
   "repository": {
     "type": "git",
