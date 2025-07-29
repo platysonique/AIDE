@@ -11,14 +11,16 @@ import asyncio
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Any
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 from code_review import review_code, batch_fix
 from debug_guide import surface_errors, debug_step
 from memory import save_memory, recall_memory, manage_privacy
-
-# ADD THIS IMPORT for our new intent handler
 from intent_handler import router as intent_router
+
+# ADD DYNAMIC MODEL MANAGEMENT
+from model_manager import load_model, list_available_models, get_model_info
 
 # --- Load Config ---
 with open(os.path.join(os.path.dirname(__file__), "config.yaml"), "r") as f:
@@ -71,6 +73,7 @@ def search_wolframalpha(query):
 def search_open_meteo(query):
     parts = query.lower().split("weather")
     loc = parts[-1].strip() if len(parts) > 1 else "Berlin"
+    # FIXED THE BROKEN URL CHARACTER
     url = f"https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current_weather=true"
     resp = requests.get(url, timeout=10)
     if resp.status_code != 200:
@@ -116,7 +119,7 @@ class AgenticIntentProcessor:
             "document": ["document", "docs", "documentation", "comment"],
             "search": ["find", "search", "look for", "locate"]
         }
-    
+
     def process_intent(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         message_lower = message.lower()
         detected_intents = []
@@ -141,7 +144,7 @@ class AgenticIntentProcessor:
             "actions": suggested_actions,
             "detected_intents": detected_intents
         }
-    
+
     def _handle_intent(self, intent: str, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         current_file = context.get("currentFile", {})
         workspace = context.get("workspace", {})
@@ -211,7 +214,7 @@ class AgenticIntentProcessor:
         }
         
         return responses.get(intent, responses["general_help"])
-    
+
     def _get_file_context_message(self, current_file: Dict[str, Any]) -> str:
         if current_file and current_file.get("filename"):
             filename = current_file["filename"].split("/")[-1]
@@ -221,7 +224,7 @@ class AgenticIntentProcessor:
             else:
                 return f"I can see you're working on {filename} ({language}). Let me analyze the entire file."
         return "Please open a file in the editor so I can provide more specific assistance."
-    
+
     def _get_workspace_context_message(self, workspace: Dict[str, Any], current_file: Dict[str, Any]) -> str:
         messages = []
         if workspace and workspace.get("name"):
@@ -234,10 +237,102 @@ class AgenticIntentProcessor:
 agentic_processor = AgenticIntentProcessor()
 
 # --- FastAPI app ---
-app = FastAPI(title="AIDE Backend with Agentic Features & Hybrid Search")
+app = FastAPI(title="AIDE Backend with Dynamic Models, Agentic Features & Hybrid Search")
 
-# ADD THE INTENT ROUTER HERE - this is our new pipeline addition
+# ADD THE INTENT ROUTER HERE
 app.include_router(intent_router, prefix="/api/v1")
+
+# ============================================================================
+# DYNAMIC MODEL MANAGEMENT - TRUE RUNTIME MODEL SWITCHING
+# ============================================================================
+
+# Initialize with first available model (no hardcoding!)
+available_models = list_available_models()
+CURRENT_MODEL = available_models[0] if available_models else None
+
+@app.get("/models")
+async def api_list_models():
+    """List all available models in the models directory - PURE DYNAMIC DISCOVERY"""
+    models = list_available_models()
+    return {
+        "models": models, 
+        "current": CURRENT_MODEL,
+        "total_available": len(models),
+        "discovery_method": "filesystem_scan"
+    }
+
+@app.post("/models/use")
+async def api_choose_model(request: Request):
+    """Switch to a different model - TRUE RUNTIME SWITCHING"""
+    global CURRENT_MODEL
+    data = await request.json()
+    model_name = data.get("name")
+    
+    if not model_name:
+        return {"error": "No model name provided"}
+    
+    available_models = list_available_models()
+    if model_name not in available_models:
+        return {
+            "error": f"Model '{model_name}' not found in models directory", 
+            "available": available_models,
+            "suggestion": "Check models/ directory for available models"
+        }
+    
+    try:
+        CURRENT_MODEL = model_name
+        load_model.cache_clear()  # Clear previous model from cache
+        
+        # Pre-load the model to verify it works
+        print(f"🔄 Loading model: {model_name}")
+        tokenizer, model = load_model(model_name)
+        print(f"✅ Model loaded successfully: {model_name}")
+        
+        return {
+            "status": "success", 
+            "active": CURRENT_MODEL, 
+            "message": f"Successfully switched to {model_name}",
+            "model_info": {
+                "tokenizer_class": tokenizer.__class__.__name__,
+                "model_class": model.__class__.__name__
+            }
+        }
+    except Exception as e:
+        return {
+            "error": f"Failed to load model {model_name}: {str(e)}",
+            "current": CURRENT_MODEL,  # Keep the previous working model
+            "suggestion": "Check model files are complete and compatible"
+        }
+
+@app.get("/models/info/{model_name}")
+async def api_model_info(model_name: str):
+    """Get detailed information about a specific model"""
+    info = get_model_info(model_name)
+    if info:
+        return info
+    else:
+        available = list_available_models()
+        return {
+            "error": f"Model '{model_name}' not found",
+            "available_models": available,
+            "suggestion": f"Try one of: {', '.join(available)}" if available else "No models found in models/ directory"
+        }
+
+@app.get("/models/current")
+async def api_current_model():
+    """Get currently active model information"""
+    if not CURRENT_MODEL:
+        return {
+            "error": "No model currently active",
+            "available_models": list_available_models(),
+            "suggestion": "Use POST /models/use to activate a model"
+        }
+    
+    return {
+        "current_model": CURRENT_MODEL,
+        "status": "active",
+        "model_info": get_model_info(CURRENT_MODEL)
+    }
 
 # ============================================================================
 # REAL SPEECH FUNCTIONALITY - Using Your Installed Coqui TTS + Vosk
@@ -268,32 +363,33 @@ async def speech_recognize(request: Request):
                     "./models/vosk-model-en-us-0.22",
                     os.path.expanduser("~/.vosk/models/vosk-model-en-us-0.22")
                 ]
+                
                 model_path = next((p for p in possible_paths if os.path.exists(p)), None)
                 
-            if not model_path:
-                # Try to download model if not found
-                import urllib.request
-                import zipfile
-                
-                model_url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
-                model_dir = os.path.expanduser("~/.cache/vosk-models")
-                os.makedirs(model_dir, exist_ok=True)
-                
-                zip_path = os.path.join(model_dir, "vosk-model-en-us-0.22.zip")
-                if not os.path.exists(zip_path):
-                    print(f"🔄 Downloading Vosk model from {model_url}...")
-                    urllib.request.urlretrieve(model_url, zip_path)
+                if not model_path:
+                    # Try to download model if not found
+                    import urllib.request
+                    import zipfile
+                    
+                    model_url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
+                    model_dir = os.path.expanduser("~/.cache/vosk-models")
+                    os.makedirs(model_dir, exist_ok=True)
+                    zip_path = os.path.join(model_dir, "vosk-model-en-us-0.22.zip")
+                    
+                    if not os.path.exists(zip_path):
+                        print(f"🔄 Downloading Vosk model from {model_url}...")
+                        urllib.request.urlretrieve(model_url, zip_path)
                     
                     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                         zip_ref.extractall(model_dir)
                     
                     model_path = os.path.join(model_dir, "vosk-model-en-us-0.22")
-                
-                if not os.path.exists(model_path):
-                    return {
-                        "status": "error",
-                        "message": "Vosk model not found and could not be downloaded. Please install manually."
-                    }
+                    
+                    if not os.path.exists(model_path):
+                        return {
+                            "status": "error",
+                            "message": "Vosk model not found and could not be downloaded. Please install manually."
+                        }
             
             model = vosk.Model(model_path)
             rec = vosk.KaldiRecognizer(model, 16000)
@@ -301,14 +397,14 @@ async def speech_recognize(request: Request):
             # Record audio from microphone using PyAudio
             p = pyaudio.PyAudio()
             stream = p.open(format=pyaudio.paInt16,
-                          channels=1,
-                          rate=16000,
-                          input=True,
-                          frames_per_buffer=8000)
+                           channels=1,
+                           rate=16000,
+                           input=True,
+                           frames_per_buffer=8000)
             
             print(f"🎤 Recording for {timeout} seconds...")
-            transcript = ""
             
+            transcript = ""
             # Record for specified timeout
             frames_to_read = int(16000 / 8000 * timeout)
             for _ in range(frames_to_read):
@@ -345,10 +441,10 @@ async def speech_recognize(request: Request):
             }
         except Exception as e:
             return {
-                "status": "error", 
+                "status": "error",
                 "message": f"Vosk speech recognition error: {str(e)}"
             }
-            
+    
     except Exception as e:
         return {
             "status": "error",
@@ -390,7 +486,7 @@ async def speech_synthesize(request: Request):
             # Create temporary audio file
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
                 audio_path = tmp_file.name
-            
+                
             # Generate speech audio
             tts.tts_to_file(text=text, file_path=audio_path)
             
@@ -417,7 +513,7 @@ async def speech_synthesize(request: Request):
             
         except ImportError as e:
             return {
-                "status": "error", 
+                "status": "error",
                 "message": f"Coqui TTS not available: {str(e)}. Ensure TTS and sounddevice are installed in your pixi environment."
             }
         except Exception as e:
@@ -425,7 +521,7 @@ async def speech_synthesize(request: Request):
                 "status": "error",
                 "message": f"Coqui TTS synthesis failed: {str(e)}"
             }
-            
+    
     except Exception as e:
         return {
             "status": "error",
@@ -460,13 +556,13 @@ async def speech_status():
         status["pyaudio_available"] = True
     except ImportError:
         pass
-        
+    
     try:
         import sounddevice
         status["sounddevice_available"] = True
     except ImportError:
         pass
-        
+    
     try:
         import soundfile
         status["soundfile_available"] = True
@@ -475,7 +571,7 @@ async def speech_status():
     
     speech_ready = (status["vosk_available"] and 
                    status["coqui_tts_available"] and 
-                   status["pyaudio_available"] and
+                   status["pyaudio_available"] and 
                    status["sounddevice_available"])
     
     return {
@@ -505,6 +601,7 @@ async def api_chat(request: Request):
     try:
         result = agentic_processor.process_intent(message, context)
         
+        # Add web search if needed
         search_keywords = ["search", "find", "look up", "what is", "who is", "when did", "how to"]
         if any(keyword in message.lower() for keyword in search_keywords):
             search_result = hybrid_online_search(message)
@@ -512,7 +609,7 @@ async def api_chat(request: Request):
                 result["response"] += f"\n\n🌐 **Web Search Result:**\n{search_result['result']}"
         
         return result
-        
+    
     except Exception as e:
         return {
             "response": f"I apologize, but I encountered an error processing your request: {str(e)}",
@@ -542,7 +639,7 @@ async def api_ingest_document(request: Request):
         }
     except Exception as e:
         return {
-            "status": "error", 
+            "status": "error",
             "message": f"Failed to ingest {file_name}: {str(e)}"
         }
 
@@ -594,4 +691,7 @@ if __name__ == "__main__":
     
     print(f"🚀 Starting AIDE backend on {host}:{port}")
     print(f"🎤 Speech functionality: Vosk + Coqui TTS enabled")
+    print(f"🤖 Available models: {list_available_models()}")
+    print(f"🎯 Current model: {CURRENT_MODEL}")
+    
     uvicorn.run(app, host=host, port=port)
