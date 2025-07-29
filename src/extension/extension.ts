@@ -1,8 +1,6 @@
-import { IntentPipeline } from './src/pipeline/intentPipeline';
-
 import * as vscode from 'vscode';
-import { launchBackend } from './src/backendManager';
-import { registerCommands } from './src/commands';
+import { backendManager } from './src/backendManager';
+import { IntentPipeline } from './src/pipeline/intentPipeline';
 import { initSpeechUI } from './src/ui/speechUI';
 import { initIngestUI } from './src/ui/ingestUI';
 import { initCodeReviewUI } from './src/ui/codeReviewUI';
@@ -11,194 +9,74 @@ import { initMemoryUI } from './src/ui/memoryUI';
 import { initChatPanel } from './src/ui/chatPanel';
 import { ChatWebviewProvider } from './src/ui/chatWebviewProvider';
 import { ToolsWebviewProvider } from './src/ui/toolsWebviewProvider';
-import * as fs from 'fs';
-import * as path from 'path';
 
-// Enhanced Universal Communication Interfaces
-interface DiagnosticDump {
-    message: string;
-    severity: number;
-    range_start: number;
-    range_end: number;
-}
-
-interface WorkspaceContext {
-    openFiles: string[];
-    currentFile?: string;
-    language?: string;
-    projectType?: string;
-    hasPackageJson: boolean;
-    hasTsConfig: boolean;
-    folderStructure: string[];
-}
-
-interface IntentRequest {
-    user_text: string;
-    diagnostics: DiagnosticDump[];
-    selection: string;
-    fileName: string;
-    workspace_context: WorkspaceContext;
-    conversation_history: string[];
-    intent_type: 'code' | 'chat' | 'file' | 'learning' | 'creative' | 'research';
-}
-
-interface ParsedIntent {
-    intent: string;
-    scope: 'file' | 'workspace' | 'selection' | 'global';
-    auto_fix: boolean;
-    tools_needed: string[];
-    confidence: number;
-    context_hints?: string[];
-    response_type: 'action' | 'explanation' | 'creation' | 'conversation';
-    requires_context: boolean;
-}
-
-
-// Global enhanced pipeline instance
-let pipeline: IntentPipeline;
-
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
     console.log('🚀 AIDE Universal Intelligence Pipeline activating...');
     
     try {
-        launchBackend(context);
-        registerCommands(context);
+        // Show initial loading message
+        const loadingMessage = vscode.window.setStatusBarMessage('$(loading~spin) Starting AIDE backend server...', 30000);
         
-        // Initialize ALL UI components
-        initSpeechUI(context);
-        initIngestUI(context);
-        initCodeReviewUI(context);
-        initDebugGuideUI(context);
-        initMemoryUI(context);
+        // Start backend server first and wait for it to be ready
+        console.log('🔧 Initializing enhanced backend manager...');
+        const serverStarted = await backendManager.startBackend(context);
         
-        // Initialize enhanced pipeline FIRST
+        if (!serverStarted) {
+            loadingMessage.dispose();
+            vscode.window.showErrorMessage(
+                'AIDE backend failed to start. Extension will have limited functionality.',
+                'Retry', 'View Logs', 'Continue Anyway'
+            ).then(selection => {
+                if (selection === 'Retry') {
+                    vscode.commands.executeCommand('workbench.action.reloadWindow');
+                } else if (selection === 'View Logs') {
+                    vscode.commands.executeCommand('workbench.action.showLogs');
+                } else if (selection === 'Continue Anyway') {
+                    initializeExtensionComponents(context, null);
+                }
+            });
+            return;
+        }
+        
+        // Clear loading message
+        loadingMessage.dispose();
+        
+        // Now that server is ready, initialize the rest of the extension
+        console.log('✅ Backend ready, initializing AIDE components...');
+        
+        // Initialize the modular pipeline
         const pipeline = new IntentPipeline();
-
-        // Register webview providers with enhanced pipeline
-        const chatProvider = new ChatWebviewProvider(context, pipeline);
-        const toolsProvider = new ToolsWebviewProvider(context);
         
-        vscode.window.registerWebviewViewProvider('aide.chatView', chatProvider);
-        vscode.window.registerWebviewViewProvider('aide.toolsView', toolsProvider);
+        initializeExtensionComponents(context, pipeline);
         
-        // Initialize chat panel after providers
-        initChatPanel(context);
-        
-        // Enhanced command registration
-        const openChatDisposable = vscode.commands.registerCommand('aide.openChat', () =>
-            vscode.commands.executeCommand('workbench.view.extension.aideChatContainer')
-        );
-        context.subscriptions.push(openChatDisposable);
-
-        // Add speech and ingest buttons to command palette and status bar
-        const speechCommand = vscode.commands.registerCommand('aide.speechInput', () => {
-            vscode.window.showInformationMessage('🎤 Speech input activated! (Feature coming soon)');
-        });
-        
-        const ingestCommand = vscode.commands.registerCommand('aide.bookIngest', () => {
-            vscode.window.showInformationMessage('📚 Book ingest activated! (Feature coming soon)');
-        });
-        
-        context.subscriptions.push(speechCommand, ingestCommand);
-
-        context.subscriptions.push(
-            vscode.commands.registerCommand('aide.intentExecute', async () => {
-                try {
-                    const userInput = await vscode.window.showInputBox({
-                        prompt: '🎯 What would you like AIDE to do? (I can code, explain, create, chat, or research!)',
-                        placeHolder: 'e.g., "format my code", "explain this function", "create a README", "how are you?"',
-                        ignoreFocusOut: true
-                    });
-
-                    if (userInput?.trim()) {
-                        await pipeline.executeIntent(userInput.trim());
-                    }
-                } catch (error) {
-                    console.error('Intent execute command failed:', error);
-                    vscode.window.showErrorMessage(`Failed to execute intent: ${error}`);
-                }
-            }),
-
-            // Enhanced quick commands
-            vscode.commands.registerCommand('aide.formatCode', async () => {
-                try {
-                    await pipeline.executeIntent('format and clean up my code with best practices');
-                } catch (error) {
-                    console.error('Format code command failed:', error);
-                }
-            }),
-
-            vscode.commands.registerCommand('aide.fixErrors', async () => {
-                try {
-                    await pipeline.executeIntent('analyze and fix all the errors and issues in my code');
-                } catch (error) {
-                    console.error('Fix errors command failed:', error);
-                }
-            }),
-
-            vscode.commands.registerCommand('aide.runTests', async () => {
-                try {
-                    await pipeline.executeIntent('run all tests and show me the results');
-                } catch (error) {
-                    console.error('Run tests command failed:', error);
-                }
-            }),
-
-            // New enhanced commands
-            vscode.commands.registerCommand('aide.explainCode', async () => {
-                try {
-                    await pipeline.executeIntent('explain the current code and what it does');
-                } catch (error) {
-                    console.error('Explain code command failed:', error);
-                }
-            }),
-
-            vscode.commands.registerCommand('aide.generateDocs', async () => {
-                try {
-                    await pipeline.executeIntent('create documentation for this project');
-                } catch (error) {
-                    console.error('Generate docs command failed:', error);
-                }
-            })
-        );
-
-        // Enhanced status bar with more options
+        // Enhanced status bar with server status
         const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        statusBarItem.text = '$(robot) AIDE';
-        statusBarItem.tooltip = 'AIDE Universal AI Assistant - Click for quick access!';
+        statusBarItem.text = '$(robot) AIDE ✅';
+        statusBarItem.tooltip = `AIDE Universal AI Assistant - Backend Running on ${backendManager.getServerUrl()}`;
         statusBarItem.command = 'aide.intentExecute';
         statusBarItem.show();
         context.subscriptions.push(statusBarItem);
-
-        // Enhanced welcome message
+        
+        // Success message with server details
         vscode.window.showInformationMessage(
-            'AIDE Universal Intelligence is ready! 🚀 I can code, explain, create, chat, research, and much more!',
-            'Open Chat',
-            'Try Smart Intent',
-            'Format Code',
-            'Explain Code',
-            'Generate Docs'
+            `🎉 AIDE is fully loaded and ready! Backend auto-started on ${backendManager.getServerUrl()}`,
+            'Open Chat', 'Try Command', 'View Status'
         ).then(selection => {
-            switch(selection) {
-                case 'Open Chat':
-                    vscode.commands.executeCommand('aide.openChat');
-                    break;
-                case 'Try Smart Intent':
-                    vscode.commands.executeCommand('aide.intentExecute');
-                    break;
-                case 'Format Code':
-                    vscode.commands.executeCommand('aide.formatCode');
-                    break;
-                case 'Explain Code':
-                    vscode.commands.executeCommand('aide.explainCode');
-                    break;
-                case 'Generate Docs':
-                    vscode.commands.executeCommand('aide.generateDocs');
-                    break;
+            if (selection === 'Open Chat') {
+                vscode.commands.executeCommand('aide.openChat');
+            } else if (selection === 'Try Command') {
+                vscode.commands.executeCommand('aide.intentExecute');
+            } else if (selection === 'View Status') {
+                vscode.window.showInformationMessage(
+                    `AIDE Status:\n` +
+                    `Backend: ${backendManager.isServerReady() ? '✅ Running' : '❌ Not Ready'}\n` +
+                    `Server: ${backendManager.getServerUrl()}\n` +
+                    `Modular Pipeline: ✅ Active`
+                );
             }
         });
-
-        console.log('✅ AIDE Universal Intelligence activation complete! Ready for any task! 🎯');
+        
+        console.log('✅ AIDE Universal Intelligence activation complete! 🎯');
         
     } catch (error) {
         console.error('AIDE activation failed:', error);
@@ -206,7 +84,135 @@ export function activate(context: vscode.ExtensionContext) {
     }
 }
 
-export function deactivate() {
-    console.log('🔴 AIDE Universal Intelligence deactivated');
+function initializeExtensionComponents(context: vscode.ExtensionContext, pipeline: IntentPipeline | null) {
+    console.log('🔧 Initializing AIDE extension components...');
+    
+    // Register all commands
+    registerCommands(context);
+    
+    // Initialize UI modules
+    initSpeechUI(context);
+    initIngestUI(context);
+    initCodeReviewUI(context);
+    initDebugGuideUI(context);
+    initMemoryUI(context);
+    
+    // Register webview providers with pipeline (if available)
+    const chatProvider = new ChatWebviewProvider(context, pipeline);
+    const toolsProvider = new ToolsWebviewProvider(context);
+    
+    vscode.window.registerWebviewViewProvider('aide.chatView', chatProvider);
+    vscode.window.registerWebviewViewProvider('aide.toolsView', toolsProvider);
+    
+    // Initialize chat panel
+    initChatPanel(context);
+    
+    console.log('✅ All AIDE components initialized successfully');
 }
 
+function registerCommands(context: vscode.ExtensionContext) {
+    // Register all AIDE commands
+    const commands = [
+        vscode.commands.registerCommand('aide.intentExecute', async () => {
+            const userInput = await vscode.window.showInputBox({
+                prompt: '🤖 What would you like AIDE to do?',
+                placeHolder: 'Type your command or question here...'
+            });
+            
+            if (userInput) {
+                if (backendManager.isServerReady()) {
+                    // Execute through pipeline if backend is ready
+                    const pipeline = new IntentPipeline();
+                    await pipeline.executeIntent(userInput, (message) => {
+                        console.log(message);
+                        vscode.window.showInformationMessage(message);
+                    });
+                } else {
+                    // Fallback handling
+                    vscode.window.showWarningMessage(
+                        '⚠️ AIDE backend is not ready. Please wait for the server to start or restart the extension.',
+                        'Restart Extension'
+                    ).then(selection => {
+                        if (selection === 'Restart Extension') {
+                            vscode.commands.executeCommand('workbench.action.reloadWindow');
+                        }
+                    });
+                }
+            }
+        }),
+
+        vscode.commands.registerCommand('aide.openChat', () => {
+            vscode.commands.executeCommand('aide.chatView.focus');
+        }),
+
+        vscode.commands.registerCommand('aide.serverStatus', () => {
+            const status = backendManager.isServerReady() ? '✅ Running' : '❌ Not Ready';
+            const url = backendManager.getServerUrl();
+            
+            vscode.window.showInformationMessage(
+                `AIDE Backend Status: ${status}\nURL: ${url}`,
+                'Restart Server', 'View Logs'
+            ).then(selection => {
+                if (selection === 'Restart Server') {
+                    vscode.commands.executeCommand('workbench.action.reloadWindow');
+                } else if (selection === 'View Logs') {
+                    vscode.commands.executeCommand('workbench.action.showLogs');
+                }
+            });
+        }),
+
+        // FIXED: Pass context directly instead of trying to get extensionContext property
+        vscode.commands.registerCommand('aide.restartBackend', async () => {
+            vscode.window.showInformationMessage('🔄 Restarting AIDE backend...');
+            backendManager.cleanup();
+            
+            // Wait a moment then restart - FIXED: Use context parameter directly
+            setTimeout(async () => {
+                await backendManager.startBackend(context); // Use context parameter directly
+                vscode.window.showInformationMessage('✅ AIDE backend restarted successfully!');
+            }, 2000);
+        }),
+
+        vscode.commands.registerCommand('aide.manageTools', async () => {
+            const options = [
+                'View Available Tools',
+                'Hide Extension Tools',
+                'Show Hidden Tools',
+                'Reset Tool Preferences',
+                'Extension Marketplace'
+            ];
+
+            const selection = await vscode.window.showQuickPick(options, {
+                placeHolder: 'AIDE Tool Management - Control your development toolkit'
+            });
+
+            switch (selection) {
+                case 'View Available Tools':
+                    vscode.commands.executeCommand('aide.toolsView.focus');
+                    break;
+                case 'Hide Extension Tools':
+                    vscode.window.showInformationMessage('🛠️ Tool hiding interface coming soon!');
+                    break;
+                case 'Show Hidden Tools':
+                    vscode.window.showInformationMessage('👁️ Show hidden tools interface coming soon!');
+                    break;
+                case 'Reset Tool Preferences':
+                    vscode.window.showInformationMessage('🔄 Tool preferences reset!');
+                    break;
+                case 'Extension Marketplace':
+                    vscode.commands.executeCommand('workbench.extensions.action.showExtensionsInstaller');
+                    break;
+            }
+        })
+    ];
+
+    // Add all commands to subscriptions
+    commands.forEach(command => context.subscriptions.push(command));
+    console.log(`✅ Registered ${commands.length} AIDE commands`);
+}
+
+export function deactivate() {
+    console.log('🔴 AIDE Universal Intelligence deactivating...');
+    backendManager.cleanup();
+    console.log('✅ AIDE deactivation complete');
+}

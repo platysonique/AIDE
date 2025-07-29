@@ -1,10 +1,16 @@
+# FILE: src/backend/api.py - COMPLETE FILE WITH REAL SPEECH INTEGRATION
+
 from fastapi import FastAPI, Request
 import uvicorn
 import os
 import requests
 import yaml
 import json
+import asyncio
+import tempfile
+from pathlib import Path
 from typing import Dict, List, Any
+sys.path.insert(0, os.path.dirname(__file__))
 
 from code_review import review_code, batch_fix
 from debug_guide import surface_errors, debug_step
@@ -232,6 +238,255 @@ app = FastAPI(title="AIDE Backend with Agentic Features & Hybrid Search")
 # ADD THE INTENT ROUTER HERE - this is our new pipeline addition
 app.include_router(intent_router, prefix="/api/v1")
 
+# ============================================================================
+# REAL SPEECH FUNCTIONALITY - Using Your Installed Coqui TTS + Vosk
+# ============================================================================
+
+@app.post("/speech/recognize")
+async def speech_recognize(request: Request):
+    """Real speech recognition using your installed Vosk"""
+    try:
+        data = await request.json()
+        timeout = data.get('timeout', 10)
+        language = data.get('language', 'en-US')
+        
+        # Use your actual Vosk installation for real speech recognition
+        try:
+            import pyaudio
+            import wave
+            import vosk
+            import json
+            
+            # Initialize Vosk model (adjust path based on your setup)
+            model_path = os.path.expanduser("~/.cache/vosk-models/vosk-model-en-us-0.22")
+            if not os.path.exists(model_path):
+                # Try common model locations
+                possible_paths = [
+                    "/usr/share/vosk-models/vosk-model-en-us-0.22",
+                    "/opt/vosk-models/vosk-model-en-us-0.22",
+                    "./models/vosk-model-en-us-0.22",
+                    os.path.expanduser("~/.vosk/models/vosk-model-en-us-0.22")
+                ]
+                model_path = next((p for p in possible_paths if os.path.exists(p)), None)
+                
+            if not model_path:
+                # Try to download model if not found
+                import urllib.request
+                import zipfile
+                
+                model_url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
+                model_dir = os.path.expanduser("~/.cache/vosk-models")
+                os.makedirs(model_dir, exist_ok=True)
+                
+                zip_path = os.path.join(model_dir, "vosk-model-en-us-0.22.zip")
+                if not os.path.exists(zip_path):
+                    print(f"🔄 Downloading Vosk model from {model_url}...")
+                    urllib.request.urlretrieve(model_url, zip_path)
+                    
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(model_dir)
+                    
+                    model_path = os.path.join(model_dir, "vosk-model-en-us-0.22")
+                
+                if not os.path.exists(model_path):
+                    return {
+                        "status": "error",
+                        "message": "Vosk model not found and could not be downloaded. Please install manually."
+                    }
+            
+            model = vosk.Model(model_path)
+            rec = vosk.KaldiRecognizer(model, 16000)
+            
+            # Record audio from microphone using PyAudio
+            p = pyaudio.PyAudio()
+            stream = p.open(format=pyaudio.paInt16,
+                          channels=1,
+                          rate=16000,
+                          input=True,
+                          frames_per_buffer=8000)
+            
+            print(f"🎤 Recording for {timeout} seconds...")
+            transcript = ""
+            
+            # Record for specified timeout
+            frames_to_read = int(16000 / 8000 * timeout)
+            for _ in range(frames_to_read):
+                try:
+                    data_chunk = stream.read(8000, exception_on_overflow=False)
+                    if rec.AcceptWaveform(data_chunk):
+                        result = json.loads(rec.Result())
+                        transcript += result.get('text', '') + " "
+                except Exception as e:
+                    print(f"Audio read error: {e}")
+                    continue
+            
+            # Get final result
+            final_result = json.loads(rec.FinalResult())
+            transcript += final_result.get('text', '')
+            
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            
+            return {
+                "status": "success",
+                "transcript": transcript.strip(),
+                "confidence": 0.95,  # Vosk doesn't provide confidence, use default
+                "language": language,
+                "backend": "vosk",
+                "duration": timeout
+            }
+            
+        except ImportError as e:
+            return {
+                "status": "error",
+                "message": f"Speech dependencies not available: {str(e)}. Ensure vosk-api and pyaudio are installed in your pixi environment."
+            }
+        except Exception as e:
+            return {
+                "status": "error", 
+                "message": f"Vosk speech recognition error: {str(e)}"
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Speech recognition failed: {str(e)}"
+        }
+
+@app.post("/speech/synthesize")
+async def speech_synthesize(request: Request):
+    """Real text-to-speech using your installed Coqui TTS"""
+    try:
+        data = await request.json()
+        text = data.get('text', '')
+        voice = data.get('voice', 'default')
+        speed = data.get('speed', 1.0)
+        play_immediately = data.get('play_immediately', True)
+        
+        if not text:
+            return {"status": "error", "message": "No text provided"}
+        
+        # Use your actual Coqui TTS installation
+        try:
+            from TTS.api import TTS
+            import sounddevice as sd
+            import soundfile as sf
+            import numpy as np
+            
+            # Initialize TTS with a good English model
+            # Use a lightweight model for faster synthesis
+            try:
+                tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC_ph", progress_bar=False)
+            except:
+                # Fallback to another model if the first one fails
+                try:
+                    tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False)
+                except:
+                    # Ultimate fallback
+                    tts = TTS(model_name="tts_models/en/vctk/vits", progress_bar=False)
+            
+            # Create temporary audio file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                audio_path = tmp_file.name
+            
+            # Generate speech audio
+            tts.tts_to_file(text=text, file_path=audio_path)
+            
+            # Play immediately if requested
+            if play_immediately:
+                try:
+                    audio_data, samplerate = sf.read(audio_path)
+                    # Play audio using sounddevice
+                    sd.play(audio_data, samplerate)
+                    sd.wait()  # Wait until audio finishes playing
+                except Exception as play_error:
+                    print(f"Audio playback failed: {play_error}")
+                    # Audio file was created successfully even if playback failed
+            
+            return {
+                "status": "success",
+                "message": f"Successfully synthesized with Coqui TTS: {text[:50]}{'...' if len(text) > 50 else ''}",
+                "audio_file": audio_path,
+                "backend": "coqui_tts",
+                "voice_used": voice,
+                "text_length": len(text),
+                "played": play_immediately
+            }
+            
+        except ImportError as e:
+            return {
+                "status": "error", 
+                "message": f"Coqui TTS not available: {str(e)}. Ensure TTS and sounddevice are installed in your pixi environment."
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Coqui TTS synthesis failed: {str(e)}"
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Text-to-speech failed: {str(e)}"
+        }
+
+@app.get("/speech/status")
+async def speech_status():
+    """Check speech system status"""
+    status = {
+        "vosk_available": False,
+        "coqui_tts_available": False,
+        "pyaudio_available": False,
+        "sounddevice_available": False,
+        "soundfile_available": False
+    }
+    
+    try:
+        import vosk
+        status["vosk_available"] = True
+    except ImportError:
+        pass
+    
+    try:
+        from TTS.api import TTS
+        status["coqui_tts_available"] = True
+    except ImportError:
+        pass
+    
+    try:
+        import pyaudio
+        status["pyaudio_available"] = True
+    except ImportError:
+        pass
+        
+    try:
+        import sounddevice
+        status["sounddevice_available"] = True
+    except ImportError:
+        pass
+        
+    try:
+        import soundfile
+        status["soundfile_available"] = True
+    except ImportError:
+        pass
+    
+    speech_ready = (status["vosk_available"] and 
+                   status["coqui_tts_available"] and 
+                   status["pyaudio_available"] and
+                   status["sounddevice_available"])
+    
+    return {
+        "status": "ok" if speech_ready else "partial",
+        "message": "Speech system status check",
+        "components": status,
+        "speech_ready": speech_ready,
+        "recommendations": [] if speech_ready else [
+            "Install missing components with: pixi add vosk-api coqui-tts pyaudio sounddevice soundfile"
+        ]
+    }
+
 # [ALL YOUR EXISTING ENDPOINTS - keeping exactly as they are]
 @app.get("/health")
 async def health():
@@ -332,5 +587,10 @@ async def api_online_search(request: Request):
     return result
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=config.get("host", "127.0.0.1"), port=int(config.get("port", 8000)))
-
+    # Support environment variables for the enhanced backend manager
+    host = os.getenv("AIDE_HOST", config.get("host", "127.0.0.1"))
+    port = int(os.getenv("AIDE_PORT", config.get("port", 8000)))
+    
+    print(f"🚀 Starting AIDE backend on {host}:{port}")
+    print(f"🎤 Speech functionality: Vosk + Coqui TTS enabled")
+    uvicorn.run(app, host=host, port=port)
