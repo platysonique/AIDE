@@ -1,5 +1,6 @@
 # FILE: src/backend/api.py - COMPLETE FILE WITH REAL SPEECH INTEGRATION
 
+import sys
 from fastapi import FastAPI, Request
 import uvicorn
 import os
