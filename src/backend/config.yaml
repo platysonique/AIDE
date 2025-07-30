@@ -22,7 +22,7 @@ fallback_order:
 
 # --- Perplexity AI ---
 # Requires an API key for full use via their API.
-perplexity_api_key: "your-perplexity-api-key-here"
+perplexity_api_key: ""
 
 # --- DuckDuckGo (Instant Answer API) ---
 duckduckgo_api_key: ""   # Not required for public use
@@ -32,7 +32,7 @@ wikipedia_api_key: ""    # Not required for public search
 
 # --- Wolfram Alpha (Short Answer API) ---
 # Sign up for a free AppID at https://products.wolframalpha.com/api/
-wolframalpha_appid: "your-wolframalpha-appid-here"
+wolframalpha_appid: ""
 
 # --- Open-Meteo (Weather API) ---
 open_meteo_api_key: ""   # Not required for basic weather queries
