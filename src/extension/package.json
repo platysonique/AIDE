@@ -1,9 +1,9 @@
 {
   "name": "aide",
-  "displayName": "AIDE - Intent Pipeline",
+  "displayName": "AIDE - Dynamic Intelligence Pipeline",
   "publisher": "platysonique",
-  "version": "1.5.9",
-  "description": "Intent \u2192 Tool \u2192 Execution pipeline for natural language development automation",
+  "version": "1.6.0",
+  "description": "Dynamic AI-powered coding assistant with WebSocket tool registry and conversational intelligence",
   "repository": {
     "type": "git",
     "url": "https://github.com/platysonique/AIDE.git"
@@ -13,7 +13,19 @@
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "AI",
+    "Development Tools"
+  ],
+  "keywords": [
+    "ai",
+    "assistant",
+    "websocket",
+    "dynamic-tools",
+    "intelligence",
+    "automation",
+    "coding",
+    "pipeline"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -47,8 +59,26 @@
     },
     "commands": [
       {
+        "command": "aide.ask",
+        "title": "Ask AIDE",
+        "category": "AIDE",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "aide.invokeTool",
+        "title": "Invoke Tool",
+        "category": "AIDE",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "aide.proposeTimeTool",
+        "title": "Demo: Propose Time Tool",
+        "category": "AIDE",
+        "icon": "$(clock)"
+      },
+      {
         "command": "aide.intentExecute",
-        "title": "AIDE: Execute Intent \u2192 Tool \u2192 Action",
+        "title": "AIDE: Execute Intent \u2192 Tool \u2192 Action (Legacy)",
         "icon": "$(play)"
       },
       {
@@ -65,18 +95,80 @@
         "command": "aide.runTests",
         "title": "AIDE: Run My Tests",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "aide.serverStatus",
+        "title": "AIDE: Server Status",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "aide.restartBackend",
+        "title": "AIDE: Restart Backend",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aide.manageTools",
+        "title": "AIDE: Manage Tools",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "aide.openChat",
+        "title": "AIDE: Open Chat",
+        "icon": "$(comment)"
       }
-    ]
+    ],
+    "keybindings": [
+      {
+        "command": "aide.ask",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "aide.invokeTool",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "aide.ask"
+        },
+        {
+          "command": "aide.invokeTool"
+        },
+        {
+          "command": "aide.proposeTimeTool"
+        },
+        {
+          "command": "aide.manageTools"
+        },
+        {
+          "command": "aide.serverStatus"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "aide.ask",
+          "group": "aide@1",
+          "when": "editorTextFocus"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p .",
     "bundle": "webpack --mode production",
-    "package": "vsce package --out aide.vsix"
+    "package": "vsce package --out aide.vsix",
+    "watch": "tsc -watch -p .",
+    "dev": "webpack --mode development --watch"
   },
   "devDependencies": {
     "@types/node": "^18.x",
     "@types/vscode": "^1.80.0",
+    "@types/ws": "^8.18.1",
     "@vscode/vsce": "^2.23.0",
     "ts-loader": "^9.4.0",
     "typescript": "^5.3.0",
