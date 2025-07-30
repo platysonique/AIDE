@@ -1,4 +1,4 @@
-# FILE: src/backend/api.py - ENHANCED WITH WEBSOCKET & DYNAMIC TOOL REGISTRY + 403 FIX
+# FILE: src/backend/api.py - ENHANCED WITH WEBSOCKET & DYNAMIC TOOL REGISTRY + 403 FIX + MODEL FIXES - COMPLETE
 
 import sys
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -152,14 +152,14 @@ Action: propose_new_tool{{"name": "tool_name", "code": "complete python code wit
 Current query analysis: {message}"""
 
 async def api_chat_internal(message: str, context: dict) -> dict:
-    """Internal conversational chat without tools - reuses your existing logic"""
+    """Internal conversational chat without tools - BULLETPROOF VERSION"""
     
     system_prompt = """You are AIDE, a helpful coding assistant. 
     Have a natural conversation with the user. 
     Only mention tools or capabilities if directly asked about them."""
     
-    # Use your existing LLM logic if model is loaded
-    if CURRENT_MODEL:
+    # FIXED: Safe model loading with proper error handling
+    if CURRENT_MODEL and isinstance(CURRENT_MODEL, (str, os.PathLike)) and os.path.exists(str(CURRENT_MODEL)):
         try:
             tokenizer, model = load_model(CURRENT_MODEL)
             
@@ -440,32 +440,67 @@ app.add_middleware(
 app.include_router(intent_router, prefix="/api/v1")
 
 # ============================================================================
-# WEBSOCKET ENDPOINT - ENHANCED WITH 403 FIX
+# WEBSOCKET ENDPOINT - BULLETPROOF VERSION WITH FULL ERROR RECOVERY
 # ============================================================================
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     try:
-        # 🚨 THE CRITICAL 403 FIX - Accept with explicit CORS headers 🚨
+        print("🔌 WebSocket connection attempt starting...")
+        
+        # Accept with CORS headers - THE 403 FIX
         await websocket.accept(extra_headers=[
             ("Access-Control-Allow-Origin", "*"),
-            ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"),
-            ("Access-Control-Allow-Headers", "*"),
             ("Access-Control-Allow-Credentials", "true")
         ])
-        print("🔌 WebSocket client connected successfully with CORS headers")
+        print("🔌 WebSocket accepted successfully!")
         
-        # Send initial registry and context
-        await websocket.send_json({
-            "type": "registry", 
-            "tools": tool_registry.serialize(),
-            "workspace_context": {
-                "available_models": list_available_models(),
-                "current_model": CURRENT_MODEL if 'CURRENT_MODEL' in globals() else None,
-                "total_tools": len(tool_registry.get_tool_names())
+        # BULLETPROOF: Safe component testing
+        try:
+            tools = tool_registry.serialize()
+            print(f"🔌 Tool registry: {len(tools)} tools found")
+        except Exception as e:
+            print(f"🔌 Tool registry error: {e}")
+            tools = []
+        
+        try:
+            models = safe_list_available_models()
+            print(f"🔌 Models: {len(models)} found")
+        except Exception as e:
+            print(f"🔌 Model listing error: {e}")
+            models = []
+        
+        try:
+            current = CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None
+            print(f"🔌 Current model: {current}")
+        except Exception as e:
+            print(f"🔌 Current model error: {e}")
+            current = None
+        
+        # Send bulletproof initial message
+        try:
+            initial_message = {
+                "type": "registry", 
+                "tools": tools,
+                "workspace_context": {
+                    "available_models": models,
+                    "current_model": current,
+                    "total_tools": len(tools),
+                    "model_status": "loaded" if current else "no_models_available"
+                }
             }
-        })
+            await websocket.send_json(initial_message)
+            print("🔌 Initial message sent successfully! 🎉")
+        except Exception as e:
+            print(f"🔌 Failed to send initial message: {e}")
+            # Send minimal fallback message
+            await websocket.send_json({
+                "type": "registry",
+                "tools": [],
+                "message": "Connected with limited functionality"
+            })
         
+        # Message processing loop
         while True:
             try:
                 data = await websocket.receive_json()
@@ -477,26 +512,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     print(f"🤖 Processing query: {message[:50]}...")
                     
-                    # Determine if this needs tool reasoning or just conversation
+                    # Determine conversation mode
                     if should_use_tool_mode(message):
                         print("🛠️ Using tool mode")
-                        # Use ReAct prompt with tools
                         enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
                         
-                        # Use your existing generate_with_tool_calling function if model loaded
-                        if CURRENT_MODEL:
+                        # SAFE model usage
+                        if is_valid_model_path(CURRENT_MODEL):
                             try:
                                 tokenizer, model = load_model(CURRENT_MODEL)
                                 response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, enhanced_prompt, context)
                                 mode = "tool"
                             except Exception as model_err:
-                                print(f"⚠️ Model failed in tool mode: {model_err}")
-                                response = f"I encountered an issue with the AI model: {str(model_err)}. Let me help using available tools."
+                                print(f"⚠️ Model failed: {model_err}")
+                                response = f"AI model encountered an issue: {str(model_err)}. Using fallback mode."
                                 used_tools = []
                                 actions = []
                                 mode = "tool_fallback"
                         else:
-                            response = "No AI model loaded. Please load a model to enable tool reasoning."
+                            response = "No AI model available. Please load a model to enable advanced reasoning."
                             used_tools = []
                             actions = []
                             mode = "tool_fallback"
@@ -508,7 +542,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         }
                     else:
                         print("💬 Using chat mode")
-                        # Use normal conversational mode 
                         response_data = await api_chat_internal(message, context)
                         mode = "chat"
                     
@@ -540,7 +573,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         await websocket.send_json({
                             "type": "error", 
-                            "message": f"Tool {tool_name} not found. Available tools: {tool_registry.get_tool_names()}"
+                            "message": f"Tool {tool_name} not found. Available: {tool_registry.get_tool_names()}"
                         })
                         
                 elif msg_type == "propose_new_tool":
@@ -548,13 +581,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         name = data.get("name")
                         code = data.get("code")
                         
-                        print(f"🏗️ Creating new tool: {name}")
+                        print(f"🏗️ Creating tool: {name}")
                         
-                        # Create tools directory if it doesn't exist
+                        # Create tools directory
                         tools_dir = Path(__file__).parent / "tools"
                         tools_dir.mkdir(exist_ok=True)
                         
-                        # Create __init__.py if it doesn't exist
+                        # Create __init__.py
                         init_file = tools_dir / "__init__.py"
                         if not init_file.exists():
                             init_file.write_text(f"""# Auto-generated tools package
@@ -567,29 +600,29 @@ def tool(name: str, desc: str = "", schema: dict = None):
     return wrapper
 """)
                         
-                        # Write the tool file
+                        # Write tool file
                         tool_file = tools_dir / f"{name}.py"
                         tool_file.write_text(code, encoding="utf-8")
                         
-                        # Hot import the new tool
+                        # Hot import
                         spec = importlib.util.spec_from_file_location(name, str(tool_file))
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
                         
-                        # Rebroadcast updated registry
+                        # Send updated registry
                         await websocket.send_json({
                             "type": "registry",
                             "tools": tool_registry.serialize(),
-                            "message": f"Tool '{name}' created and loaded successfully",
+                            "message": f"Tool '{name}' created successfully",
                             "workspace_context": {
-                                "available_models": list_available_models(),
-                                "current_model": CURRENT_MODEL if 'CURRENT_MODEL' in globals() else None,
+                                "available_models": safe_list_available_models(),
+                                "current_model": CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None,
                                 "total_tools": len(tool_registry.get_tool_names())
                             }
                         })
                         
                     except Exception as e:
-                        print(f"❌ Tool creation failed: {traceback.format_exc()}")
+                        print(f"❌ Tool creation failed: {e}")
                         await websocket.send_json({
                             "type": "error", 
                             "message": f"Failed to create tool: {str(e)}"
@@ -598,42 +631,81 @@ def tool(name: str, desc: str = "", schema: dict = None):
             except json.JSONDecodeError as e:
                 await websocket.send_json({
                     "type": "error",
-                    "message": f"Invalid JSON received: {str(e)}"
+                    "message": f"Invalid JSON: {str(e)}"
                 })
             except Exception as e:
-                print(f"❌ Message processing error: {traceback.format_exc()}")
-                await websocket.send_json({
-                    "type": "error",
-                    "message": f"Message processing failed: {str(e)}"
-                })
+                print(f"❌ Message processing error: {e}")
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Processing failed: {str(e)}"
+                    })
+                except:
+                    print("🔌 Failed to send error - connection may be dead")
                         
     except WebSocketDisconnect:
-        print("🔌 WebSocket client disconnected normally")
+        print("🔌 WebSocket disconnected normally")
     except Exception as e:
-        print(f"🔌 WebSocket connection error: {traceback.format_exc()}")
+        print(f"🔌 CRITICAL WebSocket error: {e}")
+        traceback.print_exc()
 
 # ============================================================================
-# DYNAMIC MODEL MANAGEMENT - TRUE RUNTIME MODEL SWITCHING
+# BULLETPROOF MODEL MANAGEMENT - FIXES THE NoneType ERROR
 # ============================================================================
 
-# Initialize with first available model (no hardcoding!)
-available_models = list_available_models()
-CURRENT_MODEL = available_models[0] if available_models else None
+def safe_list_available_models():
+    """Safely list available models with error handling"""
+    try:
+        models = list_available_models()
+        return models if models else []
+    except Exception as e:
+        print(f"⚠️ Model discovery failed: {e}")
+        return []
+
+def is_valid_model_path(model_path):
+    """Check if model path is valid"""
+    if not model_path:
+        return False
+    if not isinstance(model_path, (str, os.PathLike)):
+        return False
+    try:
+        return os.path.exists(str(model_path))
+    except:
+        return False
+
+def validate_current_model():
+    """Ensure CURRENT_MODEL is valid"""
+    global CURRENT_MODEL
+    if not is_valid_model_path(CURRENT_MODEL):
+        print(f"⚠️ Invalid CURRENT_MODEL: {CURRENT_MODEL}, resetting to None")
+        CURRENT_MODEL = None
+
+# FIXED: Safe model initialization with validation
+try:
+    available_models = safe_list_available_models()
+    CURRENT_MODEL = available_models[0] if available_models else None
+    validate_current_model()
+    print(f"🤖 Model initialization: Found {len(available_models)} models, current: {CURRENT_MODEL}")
+except Exception as e:
+    print(f"⚠️ Model initialization failed: {e}")
+    available_models = []
+    CURRENT_MODEL = None
 
 @app.get("/models")
 async def api_list_models():
-    """List all available models in the models directory - PURE DYNAMIC DISCOVERY"""
-    models = list_available_models()
+    """List all available models with error handling"""
+    models = safe_list_available_models()
     return {
         "models": models,
         "current": CURRENT_MODEL,
         "total_available": len(models),
-        "discovery_method": "filesystem_scan"
+        "discovery_method": "filesystem_scan",
+        "current_valid": is_valid_model_path(CURRENT_MODEL)
     }
 
 @app.post("/models/use")
 async def api_choose_model(request: Request):
-    """Switch to a different model - TRUE RUNTIME SWITCHING"""
+    """Switch to a different model with validation"""
     global CURRENT_MODEL
     data = await request.json()
     model_name = data.get("name")
@@ -641,65 +713,61 @@ async def api_choose_model(request: Request):
     if not model_name:
         return {"error": "No model name provided"}
 
-    available_models = list_available_models()
+    available_models = safe_list_available_models()
     if model_name not in available_models:
         return {
-            "error": f"Model '{model_name}' not found in models directory",
+            "error": f"Model '{model_name}' not found",
             "available": available_models,
-            "suggestion": "Check models/ directory for available models"
+            "suggestion": "Check models/ directory"
         }
 
     try:
         CURRENT_MODEL = model_name
-        load_model.cache_clear()  # Clear previous model from cache
-        # Pre-load the model to verify it works
-        print(f"🔄 Loading model: {model_name}")
-        tokenizer, model = load_model(model_name)
-        print(f"✅ Model loaded successfully: {model_name}")
-        return {
-            "status": "success",
-            "active": CURRENT_MODEL,
-            "message": f"Successfully switched to {model_name}",
-            "model_info": {
-                "tokenizer_class": tokenizer.__class__.__name__,
-                "model_class": model.__class__.__name__
+        validate_current_model()
+        
+        if is_valid_model_path(CURRENT_MODEL):
+            # Test load the model
+            tokenizer, model = load_model(CURRENT_MODEL)
+            print(f"✅ Model loaded: {model_name}")
+            return {
+                "status": "success",
+                "active": CURRENT_MODEL,
+                "message": f"Successfully switched to {model_name}"
             }
-        }
+        else:
+            return {
+                "error": f"Model path invalid: {model_name}",
+                "current": CURRENT_MODEL
+            }
     except Exception as e:
         return {
             "error": f"Failed to load model {model_name}: {str(e)}",
-            "current": CURRENT_MODEL,  # Keep the previous working model
-            "suggestion": "Check model files are complete and compatible"
+            "current": CURRENT_MODEL
         }
 
 @app.get("/models/info/{model_name}")
 async def api_model_info(model_name: str):
-    """Get detailed information about a specific model"""
-    info = get_model_info(model_name)
-    if info:
-        return info
-    else:
-        available = list_available_models()
-        return {
-            "error": f"Model '{model_name}' not found",
-            "available_models": available,
-            "suggestion": f"Try one of: {', '.join(available)}" if available else "No models found in models/ directory"
-        }
+    """Get model information with error handling"""
+    try:
+        info = get_model_info(model_name)
+        return info if info else {"error": f"Model '{model_name}' not found"}
+    except Exception as e:
+        return {"error": f"Failed to get model info: {str(e)}"}
 
 @app.get("/models/current")
 async def api_current_model():
-    """Get currently active model information"""
-    if not CURRENT_MODEL:
+    """Get current model with validation"""
+    if not is_valid_model_path(CURRENT_MODEL):
         return {
-            "error": "No model currently active",
-            "available_models": list_available_models(),
+            "error": "No valid model active",
+            "available_models": safe_list_available_models(),
             "suggestion": "Use POST /models/use to activate a model"
         }
 
     return {
         "current_model": CURRENT_MODEL,
         "status": "active",
-        "model_info": get_model_info(CURRENT_MODEL)
+        "valid": True
     }
 
 # ============================================================================
@@ -949,43 +1017,32 @@ async def speech_status():
     }
 
 # ============================================================================
-# 🚀 LLM-FIRST CONVERSATION - THE BREAKTHROUGH (ENHANCED)
+# ENHANCED LLM CONVERSATION WITH BULLETPROOF ERROR HANDLING
 # ============================================================================
 
 async def generate_with_tool_calling(model, tokenizer, message, context):
-    """
-    Enhanced LLM-first conversation with tool registry awareness
-    """
-    # Get current tool registry for the prompt
-    available_tools = tool_registry.serialize()
-    search_tools = list(PROVIDER_FUNCS.keys())
-    current_file = context.get("currentFile", {})
-    workspace = context.get("workspace", {})
-
-    # Enhanced system prompt with comprehensive tool capabilities
-    system_prompt = (
-        "You are AIDE, an advanced local coding assistant running on high-end hardware. "
-        f"Registered Tools: {json.dumps(available_tools, indent=2)}\n"
-        f"Search Providers: {search_tools}\n"
-        f"Current workspace: {workspace.get('name', 'No workspace')}\n"
-        f"Current file: {current_file.get('filename', 'No file open')}\n"
-        f"Full Context: {json.dumps(context)}\n\n"
-        "You can invoke tools by mentioning TOOL[tool_name] in your response. "
-        "Available search tools:\n"
-        "- TOOL[wikipedia] for factual information\n"
-        "- TOOL[duckduckgo] for general web search\n"
-        "- TOOL[perplexity] for AI-powered search\n"
-        "- TOOL[wolframalpha] for calculations and data\n"
-        "- TOOL[open-meteo] for weather information\n"
-        "\nFor registered custom tools, use TOOL[custom_tool_name]\n"
-        "\nRespond naturally and decide if any tools are needed based on the user's request.\n\n"
-        f"User: {message}\nAIDE:"
-    )
-
+    """Enhanced LLM conversation with safe error handling"""
     try:
-        # --- Run Model Generation ---
+        # Get current tools safely
+        available_tools = tool_registry.serialize()
+        search_tools = list(PROVIDER_FUNCS.keys())
+        current_file = context.get("currentFile", {})
+        workspace = context.get("workspace", {})
+
+        # Build system prompt
+        system_prompt = (
+            "You are AIDE, an advanced coding assistant. "
+            f"Available tools: {json.dumps(available_tools, indent=2)}\n"
+            f"Search providers: {search_tools}\n"
+            f"Workspace: {workspace.get('name', 'None')}\n"
+            f"File: {current_file.get('filename', 'None')}\n"
+            "Use TOOL[tool_name] to invoke tools.\n\n"
+            f"User: {message}\nAIDE:"
+        )
+
+        # Generate response
         input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
-        # Move to model device if available
+        
         if hasattr(model, 'device'):
             input_data = {k: v.to(model.device) for k, v in input_data.items()}
 
@@ -998,59 +1055,46 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
             pad_token_id=tokenizer.eos_token_id
         )
 
-        # Decode the response
         response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-        # Extract just the AI response part (remove the system prompt)
         if "AIDE:" in response_text:
             response_text = response_text.split("AIDE:")[-1].strip()
 
-    except Exception as generation_error:
-        # Graceful fallback if model generation fails
-        response_text = f"I encountered an issue with model generation: {str(generation_error)}. Let me help you using my fallback systems."
+        # Process tool invocations
+        tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
+        tools_found = tool_pattern.findall(response_text)
+        used_tools = []
+        actions = []
 
-    # Scan response for tool invocations
-    tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
-    tools_found = tool_pattern.findall(response_text)
+        # Execute tools safely
+        for tool in set(tools_found):
+            if tool.lower() in PROVIDER_FUNCS:
+                try:
+                    result = PROVIDER_FUNCS[tool.lower()](message)
+                    used_tools.append(tool)
+                    actions.append({"type": "search_tool", "tool": tool, "result": result})
+                    response_text += f"\n\n**{tool} Result:**\n{result}"
+                except Exception as e:
+                    response_text += f"\n\n*{tool} error: {str(e)}*"
+                    
+            elif tool_registry.exists(tool):
+                try:
+                    result = tool_registry.call(tool)
+                    used_tools.append(tool)
+                    actions.append({"type": "custom_tool", "tool": tool, "result": result})
+                    response_text += f"\n\n**{tool} Result:**\n{json.dumps(result, indent=2)}"
+                except Exception as e:
+                    response_text += f"\n\n*{tool} error: {str(e)}*"
 
-    used_tools = []
-    actions = []
+        return response_text, used_tools, actions
 
-    # Process search tools first
-    for tool in set(tools_found):
-        tool_func = PROVIDER_FUNCS.get(tool.lower())
-        if tool_func:
-            try:
-                print(f"🔧 AI requested search tool: {tool}")
-                tool_result = tool_func(message)
-                used_tools.append(tool)
-                actions.append({"type": "search_tool", "tool": tool, "result": tool_result})
-                # Enhance response with tool results
-                response_text += f"\n\n**{tool.title()} Search Result:**\n{tool_result}"
-            except Exception as tool_error:
-                response_text += f"\n\n*Note: {tool} search encountered an error: {str(tool_error)}*"
-                actions.append({"type": "search_tool", "tool": tool, "result": None, "error": str(tool_error)})
-
-    # Process custom registered tools
-    for tool in set(tools_found):
-        if tool_registry.exists(tool):
-            try:
-                print(f"🛠️ AI requested custom tool: {tool}")
-                # For now, invoke with minimal args - in future, AI could provide args
-                tool_result = tool_registry.call(tool)
-                used_tools.append(tool)
-                actions.append({"type": "custom_tool", "tool": tool, "result": tool_result})
-                response_text += f"\n\n**{tool} Tool Result:**\n{json.dumps(tool_result, indent=2)}"
-            except Exception as tool_error:
-                response_text += f"\n\n*Note: {tool} tool encountered an error: {str(tool_error)}*"
-                actions.append({"type": "custom_tool", "tool": tool, "result": None, "error": str(tool_error)})
-
-    return response_text, used_tools, actions
+    except Exception as e:
+        error_msg = f"Model generation failed: {str(e)}"
+        print(f"⚠️ {error_msg}")
+        return error_msg, [], []
 
 @app.post("/chat")
 async def api_chat(request: Request):
-    """
-    🚀 THE BREAKTHROUGH: Enhanced LLM-First Conversation with Dynamic Tool Registry
-    """
+    """Enhanced chat endpoint with bulletproof error handling"""
     data = await request.json()
     message = data.get("message", "")
     context = data.get("context", {})
@@ -1059,10 +1103,10 @@ async def api_chat(request: Request):
         return {"error": "No message provided"}
 
     try:
-        # ====== 🤖 LLM-FIRST PATH ======
-        if CURRENT_MODEL:
+        # LLM-first path with safe model checking
+        if is_valid_model_path(CURRENT_MODEL):
             try:
-                print(f"🤖 Using AI model: {CURRENT_MODEL}")
+                print(f"🤖 Using model: {CURRENT_MODEL}")
                 tokenizer, model = load_model(CURRENT_MODEL)
                 response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
 
@@ -1071,54 +1115,50 @@ async def api_chat(request: Request):
                     "model_used": CURRENT_MODEL,
                     "actions": actions,
                     "tools_invoked": used_tools,
-                    "detected_intents": ["ai_conversation"],
-                    "conversation_type": "llm_first",
-                    "tool_registry_size": len(tool_registry.get_tool_names())
+                    "conversation_type": "llm_first"
                 }
 
             except Exception as model_err:
-                print(f"⚠️ Model failed, falling back to regex: {str(model_err)}")
-                # Graceful fallback to regex if model loading fails
+                print(f"⚠️ Model failed: {str(model_err)}")
+                # Fallback to regex processor
                 result = agentic_processor.process_intent(message, context)
-                result["fallback_reason"] = f"Model failed to load: {str(model_err)}"
+                result["fallback_reason"] = f"Model error: {str(model_err)}"
                 result["conversation_type"] = "regex_fallback"
                 return result
-
-        # ====== 📝 REGEX FALLBACK PATH ======
         else:
-            print("📝 No model loaded, using regex processor")
+            # No valid model - use regex processor
+            print("📝 No valid model, using regex processor")
             result = agentic_processor.process_intent(message, context)
-            result["fallback_reason"] = "No AI model loaded"
+            result["fallback_reason"] = "No valid model loaded"
             result["conversation_type"] = "regex_fallback"
-            result["suggestion"] = "Load a model with POST /models/use to enable AI conversation"
-
-            # Add web search if needed (keeping your existing logic)
+            
+            # Add web search for search queries
             search_keywords = ["search", "find", "look up", "what is", "who is", "when did", "how to"]
             if any(keyword in message.lower() for keyword in search_keywords):
                 search_result = hybrid_online_search(message)
                 if "result" in search_result:
-                    result["response"] += f"\n\n🌐 **Web Search Result:**\n{search_result['result']}"
+                    result["response"] += f"\n\n🌐 **Web Search:**\n{search_result['result']}"
 
             return result
 
     except Exception as e:
         return {
-            "response": f"I apologize, but I encountered an error processing your request: {str(e)}",
+            "response": f"I encountered an error: {str(e)}",
             "actions": [],
-            "detected_intents": ["error"],
             "conversation_type": "error"
         }
 
-# [ALL YOUR EXISTING ENDPOINTS - KEEPING EXACTLY AS THEY ARE]
+# [ALL YOUR EXISTING ENDPOINTS - COMPLETE VERSION]
 
 @app.get("/health")
 async def health():
     return {
         "status": "ok", 
-        "message": "AIDE backend is running",
+        "message": "AIDE backend running",
         "websocket_enabled": True,
         "tools_registered": len(tool_registry.get_tool_names()),
-        "current_model": CURRENT_MODEL
+        "current_model": CURRENT_MODEL,
+        "model_valid": is_valid_model_path(CURRENT_MODEL)
     }
 
 @app.post("/agentic-intent")
@@ -1197,18 +1237,16 @@ async def startup_event():
     print("🚀 AIDE Backend starting...")
     load_existing_tools()
     print(f"🛠️ {len(tool_registry._tools)} tools registered")
-    print(f"🔌 WebSocket enabled at /ws")
-    print(f"🚨 CORS enabled - WebSocket 403 errors FIXED!")
+    print(f"🔌 WebSocket enabled with bulletproof error handling")
+    print(f"🤖 Model system: {'✅ Ready' if is_valid_model_path(CURRENT_MODEL) else '⚠️ No valid models'}")
 
 if __name__ == "__main__":
-    # Support environment variables for the enhanced backend manager
     host = os.getenv("AIDE_HOST", config.get("host", "127.0.0.1"))
     port = int(os.getenv("AIDE_PORT", config.get("port", 8000)))
-    print(f"🚀 Starting AIDE backend on {host}:{port}")
+    print(f"🚀 Starting AIDE on {host}:{port}")
     print(f"🎤 Speech functionality: Vosk + Coqui TTS enabled")
-    print(f"🤖 Available models: {list_available_models()}")
-    print(f"🎯 Current model: {CURRENT_MODEL}")
-    print(f"🔥 LLM-First conversation: {'ENABLED' if CURRENT_MODEL else 'Fallback to regex'}")
-    print(f"🔌 WebSocket tool registry: ENABLED")
-    print(f"🚨 CORS middleware: ACTIVE (403 errors FIXED)")
+    print(f"🤖 Models available: {len(safe_list_available_models())}")
+    print(f"🎯 Current model: {CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else 'None (fallback mode)'}")
+    print(f"🔌 WebSocket: ✅ Bulletproof with 403 fix")
+    print(f"🛠️ Dynamic tools: ✅ Hot-reload ready")
     uvicorn.run(app, host=host, port=port)
