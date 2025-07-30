@@ -31,7 +31,7 @@ api_keys = config.get("api_keys", {})
 fallback_order = config.get("fallback_order", [])
 providers = [config.get("online_search")] + (fallback_order or [])
 
-# [ALL YOUR EXISTING SEARCH PROVIDER FUNCTIONS - keeping them exactly as is]
+# [ALL YOUR EXISTING SEARCH PROVIDER FUNCTIONS]
 def search_perplexity(query):
     url = "https://api.perplexity.ai/search"
     headers = {"Authorization": f"Bearer {api_keys.get('perplexity_api_key', '')}"}
@@ -104,7 +104,7 @@ def hybrid_online_search(query):
             continue
     return {"error": f"No provider returned a result. Last error: {last_error}"}
 
-# [ALL YOUR EXISTING AGENTIC INTENT PROCESSOR - keeping exactly as is]
+# [ALL YOUR EXISTING AGENTIC INTENT PROCESSOR]
 class AgenticIntentProcessor:
     """Processes user intents and determines appropriate actions"""
     
@@ -119,7 +119,7 @@ class AgenticIntentProcessor:
             "document": ["document", "docs", "documentation", "comment"],
             "search": ["find", "search", "look for", "locate"]
         }
-    
+
     def process_intent(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         message_lower = message.lower()
         detected_intents = []
@@ -144,7 +144,7 @@ class AgenticIntentProcessor:
             "actions": suggested_actions,
             "detected_intents": detected_intents
         }
-    
+
     def _handle_intent(self, intent: str, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         current_file = context.get("currentFile", {})
         workspace = context.get("workspace", {})
@@ -214,7 +214,7 @@ class AgenticIntentProcessor:
         }
         
         return responses.get(intent, responses["general_help"])
-    
+
     def _get_file_context_message(self, current_file: Dict[str, Any]) -> str:
         if current_file and current_file.get("filename"):
             filename = current_file["filename"].split("/")[-1]
@@ -224,7 +224,7 @@ class AgenticIntentProcessor:
             else:
                 return f"I can see you're working on {filename} ({language}). Let me analyze the entire file."
         return "Please open a file in the editor so I can provide more specific assistance."
-    
+
     def _get_workspace_context_message(self, workspace: Dict[str, Any], current_file: Dict[str, Any]) -> str:
         messages = []
         if workspace and workspace.get("name"):
@@ -282,6 +282,7 @@ async def api_choose_model(request: Request):
     try:
         CURRENT_MODEL = model_name
         load_model.cache_clear()  # Clear previous model from cache
+        
         # Pre-load the model to verify it works
         print(f"🔄 Loading model: {model_name}")
         tokenizer, model = load_model(model_name)
@@ -437,13 +438,13 @@ async def speech_recognize(request: Request):
                 "status": "error",
                 "message": f"Speech dependencies not available: {str(e)}. Ensure vosk-api and pyaudio are installed in your pixi environment."
             }
-        
+            
         except Exception as e:
             return {
                 "status": "error",
                 "message": f"Vosk speech recognition error: {str(e)}"
             }
-    
+            
     except Exception as e:
         return {
             "status": "error",
@@ -515,13 +516,13 @@ async def speech_synthesize(request: Request):
                 "status": "error",
                 "message": f"Coqui TTS not available: {str(e)}. Ensure TTS and sounddevice are installed in your pixi environment."
             }
-        
+            
         except Exception as e:
             return {
                 "status": "error",
                 "message": f"Coqui TTS synthesis failed: {str(e)}"
             }
-    
+            
     except Exception as e:
         return {
             "status": "error",
@@ -615,7 +616,7 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         "\nRespond naturally and decide if any tools are needed based on the user's request.\n\n"
         f"User: {message}\nAIDE:"
     )
-
+    
     try:
         # --- Run Model Generation ---
         input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
@@ -623,17 +624,16 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         # Move to model device if available
         if hasattr(model, 'device'):
             input_data = {k: v.to(model.device) for k, v in input_data.items()}
-
-        # Generate response with your beast hardware optimization
-        with tokenizer.chat_template:
-            output_tokens = model.generate(
-                **input_data,
-                max_new_tokens=512,
-                do_sample=True,
-                temperature=0.8,
-                top_p=0.95,
-                pad_token_id=tokenizer.eos_token_id
-            )
+        
+        # 🔥 FIXED: Removed the broken "with tokenizer.chat_template:" line!
+        output_tokens = model.generate(
+            **input_data,
+            max_new_tokens=512,
+            do_sample=True,
+            temperature=0.8,
+            top_p=0.95,
+            pad_token_id=tokenizer.eos_token_id
+        )
         
         # Decode the response
         response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
@@ -641,17 +641,18 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         # Extract just the AI response part (remove the system prompt)
         if "AIDE:" in response_text:
             response_text = response_text.split("AIDE:")[-1].strip()
-
+            
     except Exception as generation_error:
         # Graceful fallback if model generation fails
         response_text = f"I encountered an issue with model generation: {str(generation_error)}. Let me help you using my fallback systems."
-
+    
     # Scan response for tool invocations
     tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
     tools_found = tool_pattern.findall(response_text)
+    
     used_tools = []
     actions = []
-
+    
     # If LLM requested tools, run them and enhance the response
     for tool in set(tools_found):
         tool_func = PROVIDER_FUNCS.get(tool.lower())
@@ -661,12 +662,13 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
                 tool_result = tool_func(message)
                 used_tools.append(tool)
                 actions.append({"type": "tool_call", "tool": tool, "result": tool_result})
+                
                 # Enhance response with tool results
                 response_text += f"\n\n**{tool.title()} Search Result:**\n{tool_result}"
             except Exception as tool_error:
                 response_text += f"\n\n*Note: {tool} search encountered an error: {str(tool_error)}*"
                 actions.append({"type": "tool_call", "tool": tool, "result": None, "error": str(tool_error)})
-
+    
     return response_text, used_tools, actions
 
 @app.post("/chat")
@@ -678,17 +680,16 @@ async def api_chat(request: Request):
     data = await request.json()
     message = data.get("message", "")
     context = data.get("context", {})
-
+    
     if not message:
         return {"error": "No message provided"}
-
+    
     try:
         # ====== 🤖 LLM-FIRST PATH ======
         if CURRENT_MODEL:
             try:
                 print(f"🤖 Using AI model: {CURRENT_MODEL}")
                 tokenizer, model = load_model(CURRENT_MODEL)
-                
                 response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
                 
                 return {
@@ -724,7 +725,7 @@ async def api_chat(request: Request):
                     result["response"] += f"\n\n🌐 **Web Search Result:**\n{search_result['result']}"
             
             return result
-
+    
     except Exception as e:
         return {
             "response": f"I apologize, but I encountered an error processing your request: {str(e)}",
@@ -734,7 +735,6 @@ async def api_chat(request: Request):
         }
 
 # [ALL YOUR EXISTING ENDPOINTS - keeping exactly as they are]
-
 @app.get("/health")
 async def health():
     return {"status": "ok", "message": "AIDE backend is running"}
