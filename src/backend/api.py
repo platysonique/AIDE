@@ -1,4 +1,4 @@
-# FILE: src/backend/api.py - COMPLETE FILE WITH REAL SPEECH INTEGRATION
+# FILE: src/backend/api.py - COMPLETE FILE WITH LLM-FIRST CONVERSATION BREAKTHROUGH
 
 import sys
 from fastapi import FastAPI, Request
@@ -11,6 +11,7 @@ import asyncio
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Any
+import re
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -73,7 +74,6 @@ def search_wolframalpha(query):
 def search_open_meteo(query):
     parts = query.lower().split("weather")
     loc = parts[-1].strip() if len(parts) > 1 else "Berlin"
-    # FIXED THE BROKEN URL CHARACTER
     url = f"https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current_weather=true"
     resp = requests.get(url, timeout=10)
     if resp.status_code != 200:
@@ -119,7 +119,7 @@ class AgenticIntentProcessor:
             "document": ["document", "docs", "documentation", "comment"],
             "search": ["find", "search", "look for", "locate"]
         }
-
+    
     def process_intent(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         message_lower = message.lower()
         detected_intents = []
@@ -144,7 +144,7 @@ class AgenticIntentProcessor:
             "actions": suggested_actions,
             "detected_intents": detected_intents
         }
-
+    
     def _handle_intent(self, intent: str, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         current_file = context.get("currentFile", {})
         workspace = context.get("workspace", {})
@@ -214,7 +214,7 @@ class AgenticIntentProcessor:
         }
         
         return responses.get(intent, responses["general_help"])
-
+    
     def _get_file_context_message(self, current_file: Dict[str, Any]) -> str:
         if current_file and current_file.get("filename"):
             filename = current_file["filename"].split("/")[-1]
@@ -224,7 +224,7 @@ class AgenticIntentProcessor:
             else:
                 return f"I can see you're working on {filename} ({language}). Let me analyze the entire file."
         return "Please open a file in the editor so I can provide more specific assistance."
-
+    
     def _get_workspace_context_message(self, workspace: Dict[str, Any], current_file: Dict[str, Any]) -> str:
         messages = []
         if workspace and workspace.get("name"):
@@ -255,7 +255,7 @@ async def api_list_models():
     """List all available models in the models directory - PURE DYNAMIC DISCOVERY"""
     models = list_available_models()
     return {
-        "models": models, 
+        "models": models,
         "current": CURRENT_MODEL,
         "total_available": len(models),
         "discovery_method": "filesystem_scan"
@@ -274,7 +274,7 @@ async def api_choose_model(request: Request):
     available_models = list_available_models()
     if model_name not in available_models:
         return {
-            "error": f"Model '{model_name}' not found in models directory", 
+            "error": f"Model '{model_name}' not found in models directory",
             "available": available_models,
             "suggestion": "Check models/ directory for available models"
         }
@@ -282,15 +282,14 @@ async def api_choose_model(request: Request):
     try:
         CURRENT_MODEL = model_name
         load_model.cache_clear()  # Clear previous model from cache
-        
         # Pre-load the model to verify it works
         print(f"🔄 Loading model: {model_name}")
         tokenizer, model = load_model(model_name)
         print(f"✅ Model loaded successfully: {model_name}")
         
         return {
-            "status": "success", 
-            "active": CURRENT_MODEL, 
+            "status": "success",
+            "active": CURRENT_MODEL,
             "message": f"Successfully switched to {model_name}",
             "model_info": {
                 "tokenizer_class": tokenizer.__class__.__name__,
@@ -365,7 +364,6 @@ async def speech_recognize(request: Request):
                 ]
                 
                 model_path = next((p for p in possible_paths if os.path.exists(p)), None)
-                
                 if not model_path:
                     # Try to download model if not found
                     import urllib.request
@@ -397,14 +395,14 @@ async def speech_recognize(request: Request):
             # Record audio from microphone using PyAudio
             p = pyaudio.PyAudio()
             stream = p.open(format=pyaudio.paInt16,
-                           channels=1,
-                           rate=16000,
-                           input=True,
-                           frames_per_buffer=8000)
+                          channels=1,
+                          rate=16000,
+                          input=True,
+                          frames_per_buffer=8000)
             
             print(f"🎤 Recording for {timeout} seconds...")
-            
             transcript = ""
+            
             # Record for specified timeout
             frames_to_read = int(16000 / 8000 * timeout)
             for _ in range(frames_to_read):
@@ -439,6 +437,7 @@ async def speech_recognize(request: Request):
                 "status": "error",
                 "message": f"Speech dependencies not available: {str(e)}. Ensure vosk-api and pyaudio are installed in your pixi environment."
             }
+        
         except Exception as e:
             return {
                 "status": "error",
@@ -486,7 +485,7 @@ async def speech_synthesize(request: Request):
             # Create temporary audio file
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
                 audio_path = tmp_file.name
-                
+            
             # Generate speech audio
             tts.tts_to_file(text=text, file_path=audio_path)
             
@@ -516,6 +515,7 @@ async def speech_synthesize(request: Request):
                 "status": "error",
                 "message": f"Coqui TTS not available: {str(e)}. Ensure TTS and sounddevice are installed in your pixi environment."
             }
+        
         except Exception as e:
             return {
                 "status": "error",
@@ -584,38 +584,160 @@ async def speech_status():
         ]
     }
 
-# [ALL YOUR EXISTING ENDPOINTS - keeping exactly as they are]
-@app.get("/health")
-async def health():
-    return {"status": "ok", "message": "AIDE backend is running"}
+# ============================================================================
+# 🚀 LLM-FIRST CONVERSATION - THE BREAKTHROUGH
+# ============================================================================
+
+async def generate_with_tool_calling(model, tokenizer, message, context):
+    """
+    Let the loaded LLM process the user message and decide when to trigger tools/search/web/code actions.
+    This is where your AI models finally take control instead of regex patterns.
+    """
+    # Compose a system prompt injecting all available tools
+    available_tools = list(PROVIDER_FUNCS.keys())
+    current_file = context.get("currentFile", {})
+    workspace = context.get("workspace", {})
+    
+    # Enhanced system prompt with tool capabilities
+    system_prompt = (
+        "You are AIDE, an advanced local coding assistant running on high-end hardware. "
+        f"Available search tools: {available_tools}\n"
+        f"Current workspace: {workspace.get('name', 'No workspace')}\n"
+        f"Current file: {current_file.get('filename', 'No file open')}\n"
+        f"Context: {json.dumps(context)}\n\n"
+        "You can invoke tools by mentioning TOOL[tool_name] in your response. "
+        "Available tools:\n"
+        "- TOOL[wikipedia] for factual information\n"
+        "- TOOL[duckduckgo] for general web search\n"
+        "- TOOL[perplexity] for AI-powered search\n"
+        "- TOOL[wolframalpha] for calculations and data\n"
+        "- TOOL[open-meteo] for weather information\n"
+        "\nRespond naturally and decide if any tools are needed based on the user's request.\n\n"
+        f"User: {message}\nAIDE:"
+    )
+
+    try:
+        # --- Run Model Generation ---
+        input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
+        
+        # Move to model device if available
+        if hasattr(model, 'device'):
+            input_data = {k: v.to(model.device) for k, v in input_data.items()}
+
+        # Generate response with your beast hardware optimization
+        with tokenizer.chat_template:
+            output_tokens = model.generate(
+                **input_data,
+                max_new_tokens=512,
+                do_sample=True,
+                temperature=0.8,
+                top_p=0.95,
+                pad_token_id=tokenizer.eos_token_id
+            )
+        
+        # Decode the response
+        response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        
+        # Extract just the AI response part (remove the system prompt)
+        if "AIDE:" in response_text:
+            response_text = response_text.split("AIDE:")[-1].strip()
+
+    except Exception as generation_error:
+        # Graceful fallback if model generation fails
+        response_text = f"I encountered an issue with model generation: {str(generation_error)}. Let me help you using my fallback systems."
+
+    # Scan response for tool invocations
+    tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
+    tools_found = tool_pattern.findall(response_text)
+    used_tools = []
+    actions = []
+
+    # If LLM requested tools, run them and enhance the response
+    for tool in set(tools_found):
+        tool_func = PROVIDER_FUNCS.get(tool.lower())
+        if tool_func:
+            try:
+                print(f"🔧 AI requested tool: {tool}")
+                tool_result = tool_func(message)
+                used_tools.append(tool)
+                actions.append({"type": "tool_call", "tool": tool, "result": tool_result})
+                # Enhance response with tool results
+                response_text += f"\n\n**{tool.title()} Search Result:**\n{tool_result}"
+            except Exception as tool_error:
+                response_text += f"\n\n*Note: {tool} search encountered an error: {str(tool_error)}*"
+                actions.append({"type": "tool_call", "tool": tool, "result": None, "error": str(tool_error)})
+
+    return response_text, used_tools, actions
 
 @app.post("/chat")
 async def api_chat(request: Request):
+    """
+    🚀 THE BREAKTHROUGH: LLM-First Conversation with Graceful Fallback
+    Your AI models finally drive the conversation instead of regex patterns!
+    """
     data = await request.json()
     message = data.get("message", "")
     context = data.get("context", {})
-    
+
     if not message:
         return {"error": "No message provided"}
-    
+
     try:
-        result = agentic_processor.process_intent(message, context)
+        # ====== 🤖 LLM-FIRST PATH ======
+        if CURRENT_MODEL:
+            try:
+                print(f"🤖 Using AI model: {CURRENT_MODEL}")
+                tokenizer, model = load_model(CURRENT_MODEL)
+                
+                response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
+                
+                return {
+                    "response": response,
+                    "model_used": CURRENT_MODEL,
+                    "actions": actions,
+                    "tools_invoked": used_tools,
+                    "detected_intents": ["ai_conversation"],
+                    "conversation_type": "llm_first"
+                }
+                
+            except Exception as model_err:
+                print(f"⚠️ Model failed, falling back to regex: {str(model_err)}")
+                # Graceful fallback to regex if model loading fails
+                result = agentic_processor.process_intent(message, context)
+                result["fallback_reason"] = f"Model failed to load: {str(model_err)}"
+                result["conversation_type"] = "regex_fallback"
+                return result
         
-        # Add web search if needed
-        search_keywords = ["search", "find", "look up", "what is", "who is", "when did", "how to"]
-        if any(keyword in message.lower() for keyword in search_keywords):
-            search_result = hybrid_online_search(message)
-            if "result" in search_result:
-                result["response"] += f"\n\n🌐 **Web Search Result:**\n{search_result['result']}"
-        
-        return result
-    
+        # ====== 📝 REGEX FALLBACK PATH ======
+        else:
+            print("📝 No model loaded, using regex processor")
+            result = agentic_processor.process_intent(message, context)
+            result["fallback_reason"] = "No AI model loaded"
+            result["conversation_type"] = "regex_fallback"
+            result["suggestion"] = "Load a model with POST /models/use to enable AI conversation"
+            
+            # Add web search if needed (keeping your existing logic)
+            search_keywords = ["search", "find", "look up", "what is", "who is", "when did", "how to"]
+            if any(keyword in message.lower() for keyword in search_keywords):
+                search_result = hybrid_online_search(message)
+                if "result" in search_result:
+                    result["response"] += f"\n\n🌐 **Web Search Result:**\n{search_result['result']}"
+            
+            return result
+
     except Exception as e:
         return {
             "response": f"I apologize, but I encountered an error processing your request: {str(e)}",
             "actions": [],
-            "detected_intents": ["error"]
+            "detected_intents": ["error"],
+            "conversation_type": "error"
         }
+
+# [ALL YOUR EXISTING ENDPOINTS - keeping exactly as they are]
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "message": "AIDE backend is running"}
 
 @app.post("/agentic-intent")
 async def api_agentic_intent(request: Request):
@@ -693,5 +815,6 @@ if __name__ == "__main__":
     print(f"🎤 Speech functionality: Vosk + Coqui TTS enabled")
     print(f"🤖 Available models: {list_available_models()}")
     print(f"🎯 Current model: {CURRENT_MODEL}")
+    print(f"🔥 LLM-First conversation: {'ENABLED' if CURRENT_MODEL else 'Fallback to regex'}")
     
     uvicorn.run(app, host=host, port=port)
