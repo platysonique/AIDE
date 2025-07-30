@@ -28,6 +28,17 @@ interface IngestResponse {
     message: string;
 }
 
+// NEW: Chat response interface
+interface ChatResponse {
+    response: string;
+    model_used?: string;
+    actions?: any[];
+    tools_invoked?: string[];
+    detected_intents?: string[];
+    conversation_type?: string;
+    fallback_reason?: string;
+}
+
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private chatHistory: Array<{message: string, type: 'user' | 'system' | 'error', timestamp: string}> = [];
@@ -244,6 +255,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         await this.processMessageQueue();
     }
 
+    // 🚀 THE BREAKTHROUGH: Direct Backend API Integration
     private async processMessageQueue(): Promise<void> {
         if (this.processingMessage || this.messageQueue.length === 0) {
             return;
@@ -256,40 +268,85 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
 
             // Add user message to history
             this.addChatMessage(`👤 ${text}`, 'user');
-            this.addChatMessage(`🤔 Analyzing your request...`, 'system');
+            this.addChatMessage(`🤔 Analyzing with AI model...`, 'system');
 
-            if (!this.pipeline) {
-                this.addChatMessage(`❌ Pipeline not available. Please restart AIDE.`, 'error');
-                return;
-            }
+            // 🔥 BYPASS PIPELINE - Call backend API directly!
+            try {
+                const response = await fetch('http://127.0.0.1:8000/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: text,
+                        context: {
+                            currentFile: vscode.window.activeTextEditor?.document ? {
+                                filename: vscode.window.activeTextEditor.document.fileName,
+                                language: vscode.window.activeTextEditor.document.languageId,
+                                selection: vscode.window.activeTextEditor.selection ? 
+                                    vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection) : null
+                            } : null,
+                            workspace: {
+                                name: vscode.workspace.name || 'No workspace',
+                                rootPath: vscode.workspace.rootPath
+                            }
+                        }
+                    })
+                });
 
-            // Track response messages to prevent duplicates within this execution
-            const responseTracker = new Set();
-            let responseCount = 0;
-
-            // Use the modular pipeline with enhanced callback deduplication
-            await this.pipeline.executeIntent(text, (message: string) => {
-                // Create message signature for deduplication
-                const messageSignature = message.replace(/[🎯✅💬🤖🔧📚🎨⚡\d]/g, '').trim();
-
-                // Skip empty or very short messages
-                if (messageSignature.length < 3) {
-                    return;
+                if (response.ok) {
+                    const result = await response.json() as ChatResponse;
+                    
+                    // Display AI response
+                    this.addChatMessage(result.response, 'system');
+                    
+                    // Show model used if available
+                    if (result.model_used) {
+                        this.addChatMessage(`🤖 Powered by: ${result.model_used}`, 'system');
+                    }
+                    
+                    // Show conversation type for debugging
+                    if (result.conversation_type) {
+                        console.log(`💡 Conversation type: ${result.conversation_type}`);
+                        if (result.conversation_type === 'regex_fallback' && result.fallback_reason) {
+                            this.addChatMessage(`⚠️ Note: Using fallback mode - ${result.fallback_reason}`, 'system');
+                        }
+                    }
+                    
+                    // Show tools invoked if any
+                    if (result.tools_invoked && result.tools_invoked.length > 0) {
+                        this.addChatMessage(`🔧 Tools used: ${result.tools_invoked.join(', ')}`, 'system');
+                    }
+                    
+                } else {
+                    throw new Error(`Backend API returned ${response.status}: ${response.statusText}`);
                 }
+                
+            } catch (apiError) {
+                console.error('Backend API error:', apiError);
+                this.addChatMessage(`❌ AI Backend Error: ${apiError}`, 'error');
+                this.addChatMessage('💭 Tip: Make sure your Python backend is running on port 8000', 'system');
+                
+                // Optional: Fallback to pipeline only if backend is completely unavailable
+                if (this.pipeline) {
+                    this.addChatMessage('🔄 Attempting fallback to local pipeline...', 'system');
+                    try {
+                        const responseTracker = new Set();
+                        let responseCount = 0;
 
-                // Prevent duplicate responses within this execution
-                if (!responseTracker.has(messageSignature) && !this.isDuplicateMessage(message)) {
-                    responseTracker.add(messageSignature);
-                    responseCount++;
-
-                    // Limit responses to prevent spam (max 5 per execution)
-                    if (responseCount <= 5) {
-                        this.addChatMessage(message, 'system');
-                    } else {
-                        console.log(`⚠️ Response limit reached, skipping: "${message.substring(0, 50)}..."`);
+                        await this.pipeline.executeIntent(text, (message: string) => {
+                            const messageSignature = message.replace(/[🎯✅💬🤖🔧📚🎨⚡\d]/g, '').trim();
+                            if (messageSignature.length >= 3 && !responseTracker.has(messageSignature) && !this.isDuplicateMessage(message)) {
+                                responseTracker.add(messageSignature);
+                                responseCount++;
+                                if (responseCount <= 3) {
+                                    this.addChatMessage(message, 'system');
+                                }
+                            }
+                        });
+                    } catch (pipelineError) {
+                        this.addChatMessage(`❌ Pipeline fallback also failed: ${pipelineError}`, 'error');
                     }
                 }
-            });
+            }
 
         } catch (error: any) {
             console.error('Chat message processing error:', error);
