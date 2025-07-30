@@ -446,7 +446,7 @@ app.include_router(intent_router, prefix="/api/v1")
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     try:
-        # 🚨 THE KEY 403 FIX - Accept with explicit CORS headers 🚨
+        # 🚨 THE CRITICAL 403 FIX - Accept with explicit CORS headers 🚨
         await websocket.accept(extra_headers=[
             ("Access-Control-Allow-Origin", "*"),
             ("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"),
