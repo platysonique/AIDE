@@ -26,12 +26,11 @@ export class EnhancedBackendManager {
     private readonly MAX_RESTART_ATTEMPTS = 3;
     private restartAttempts = 0;
     private lastRestartTime = 0;
-    
     // Request queuing for high performance
     private requestQueue: Array<{
-        request: () => Promise<any>,
-        resolve: (value: any) => void,
-        reject: (error: any) => void
+        request: () => Promise<any>;
+        resolve: (value: any) => void;
+        reject: (error: any) => void;
     }> = [];
     private isProcessingQueue = false;
 
@@ -48,10 +47,8 @@ export class EnhancedBackendManager {
 
             // Find available port
             this.serverPort = await this.findAvailablePort();
-            
             // Find pixi command
             const pixiCommand = await this.findPixiCommand();
-            
             // Find project root
             const workspaceRoot = this.findProjectRoot();
             if (!workspaceRoot) {
@@ -59,12 +56,12 @@ export class EnhancedBackendManager {
             }
 
             console.log(`🎯 Starting server on ${this.serverHost}:${this.serverPort}`);
-
-            // Start server with enhanced monitoring
+            
+            // FIXED: Start server with proper Python path and module loading
             this.backendProcess = spawn(pixiCommand, [
-                'run', 
-                'python', 
-                'src/backend/api.py'
+                'run',
+                'python',
+                '-m', 'src.backend.api'  // Use module syntax instead of file path
             ], {
                 cwd: workspaceRoot,
                 stdio: ['ignore', 'pipe', 'pipe'],
@@ -73,22 +70,22 @@ export class EnhancedBackendManager {
                 env: {
                     ...process.env,
                     AIDE_PORT: this.serverPort.toString(),
-                    AIDE_HOST: this.serverHost
+                    AIDE_HOST: this.serverHost,
+                    PYTHONPATH: path.join(workspaceRoot, 'src')  // FIXED: Add proper Python path
                 }
             });
 
             // Enhanced output monitoring
             this.setupProcessMonitoring();
-            
-            // Wait for server with longer timeout
-            const serverStarted = await this.waitForServerReady(30000); // 30 second timeout
-            
+
+            // FIXED: Wait for server with longer timeout (45 seconds instead of 30)
+            const serverStarted = await this.waitForServerReady(45000);
+
             if (serverStarted) {
                 this.startEnhancedHealthMonitoring(context);
                 context.subscriptions.push({
                     dispose: () => this.cleanup()
                 });
-                
                 console.log('✅ AIDE backend started with full monitoring suite');
                 return true;
             } else {
@@ -103,10 +100,10 @@ export class EnhancedBackendManager {
     }
 
     private async findPixiCommand(): Promise<string> {
-        const possibleCommands = process.platform === 'win32' 
-            ? ['pixi.exe', 'pixi'] 
+        const possibleCommands = process.platform === 'win32'
+            ? ['pixi.exe', 'pixi']
             : ['pixi'];
-        
+
         for (const cmd of possibleCommands) {
             try {
                 // Try to run pixi --version to test if it exists
@@ -116,7 +113,7 @@ export class EnhancedBackendManager {
                     testProcess.on('error', () => resolve(false));
                     setTimeout(() => resolve(false), 3000); // 3s timeout
                 });
-                
+
                 if (success) {
                     console.log(`✅ Found pixi command: ${cmd}`);
                     return cmd;
@@ -125,12 +122,12 @@ export class EnhancedBackendManager {
                 continue;
             }
         }
-        
+
         // Fallback: try common installation paths
-        const commonPaths = process.platform === 'win32' 
+        const commonPaths = process.platform === 'win32'
             ? ['C:\\Users\\%USERNAME%\\.pixi\\bin\\pixi.exe', '%USERPROFILE%\\.pixi\\bin\\pixi.exe']
             : ['/usr/local/bin/pixi', `${process.env.HOME}/.pixi/bin/pixi`];
-        
+
         for (const fullPath of commonPaths) {
             const expandedPath = fullPath.replace(/%([^%]+)%/g, (_, key) => process.env[key] || '');
             if (fs.existsSync(expandedPath)) {
@@ -138,7 +135,7 @@ export class EnhancedBackendManager {
                 return expandedPath;
             }
         }
-        
+
         throw new Error('Pixi command not found. Please ensure pixi is installed and in PATH.');
     }
 
@@ -151,13 +148,13 @@ export class EnhancedBackendManager {
                 });
                 server.on('error', () => resolve(false));
             });
-            
+
             if (available) {
                 console.log(`🔌 Using port ${port} for AIDE backend`);
                 return port;
             }
         }
-        
+
         throw new Error('No available ports found in range 8000-8099');
     }
 
@@ -174,7 +171,7 @@ export class EnhancedBackendManager {
             }
             currentDir = path.dirname(currentDir);
         }
-        
+
         // Also check workspace folders
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (workspaceFolders) {
@@ -186,7 +183,6 @@ export class EnhancedBackendManager {
                 }
             }
         }
-        
         return null;
     }
 
@@ -198,7 +194,7 @@ export class EnhancedBackendManager {
             console.log(`[AIDE Backend] ${output}`);
             
             // Multiple startup indicators
-            if (output.includes('Uvicorn running on') || 
+            if (output.includes('Uvicorn running on') ||
                 output.includes('Application startup complete') ||
                 output.includes('Server started on') ||
                 output.includes('Listening on')) {
@@ -240,7 +236,6 @@ export class EnhancedBackendManager {
             if (this.serverReady && await this.isServerHealthy()) {
                 return true;
             }
-            
             // Wait 500ms before checking again
             await new Promise(resolve => setTimeout(resolve, 500));
         }
@@ -255,7 +250,7 @@ export class EnhancedBackendManager {
                 headers: { 'Content-Type': 'application/json' },
                 signal: AbortSignal.timeout(2000) // 2 second timeout
             });
-            
+
             if (response.ok) {
                 // FIXED: Proper type assertion instead of annotation
                 const health = await response.json() as HealthResponse;
@@ -271,6 +266,7 @@ export class EnhancedBackendManager {
     private startEnhancedHealthMonitoring(context: vscode.ExtensionContext): void {
         this.healthCheckInterval = setInterval(async () => {
             const healthy = await this.isServerHealthy();
+            
             if (!healthy && this.serverReady) {
                 console.log('⚠️ AIDE backend health check failed');
                 this.serverReady = false;
@@ -291,11 +287,10 @@ export class EnhancedBackendManager {
         if (now - this.lastRestartTime > 5 * 60 * 1000) {
             this.restartAttempts = 0;
         }
-        
+
         if (this.restartAttempts < this.MAX_RESTART_ATTEMPTS) {
             this.restartAttempts++;
             this.lastRestartTime = now;
-            
             console.log(`🔄 Server failure detected. Restart attempt ${this.restartAttempts}/${this.MAX_RESTART_ATTEMPTS}`);
             
             const success = await this.attemptServerRestart(context);
@@ -321,7 +316,6 @@ export class EnhancedBackendManager {
         // Try restart up to 3 times
         for (let attempt = 1; attempt <= 3; attempt++) {
             console.log(`🚀 Restart attempt ${attempt}/3...`);
-            
             try {
                 const success = await this.startBackend(context);
                 if (success) {
@@ -354,7 +348,6 @@ export class EnhancedBackendManager {
 
     private enterDegradedMode(): void {
         this.serverReady = false;
-        
         vscode.window.showWarningMessage(
             '⚠️ AIDE backend is unavailable. Extension will run in offline mode with limited functionality.',
             'Try Manual Start', 'Reload Extension'
@@ -374,14 +367,13 @@ export class EnhancedBackendManager {
         if (!this.isServerReady()) {
             throw new Error('AIDE backend server is not ready');
         }
-        
+
         return new Promise<T>((resolve, reject) => {
             this.requestQueue.push({
                 request: requestFn,
                 resolve,
                 reject
             });
-            
             this.processQueue();
         });
     }
@@ -390,12 +382,11 @@ export class EnhancedBackendManager {
         if (this.isProcessingQueue || this.requestQueue.length === 0) {
             return;
         }
-        
+
         this.isProcessingQueue = true;
         
         while (this.requestQueue.length > 0) {
             const { request, resolve, reject } = this.requestQueue.shift()!;
-            
             try {
                 const result = await request();
                 resolve(result);
@@ -426,7 +417,7 @@ export class EnhancedBackendManager {
             clearInterval(this.healthCheckInterval);
             this.healthCheckInterval = undefined;
         }
-        
+
         if (this.backendProcess && !this.backendProcess.killed) {
             console.log('🔴 Terminating AIDE backend process tree...');
             
@@ -449,7 +440,7 @@ export class EnhancedBackendManager {
                 }
             }, 8000); // 8 second timeout
         }
-        
+
         this.serverReady = false;
         this.backendProcess = null;
         this.requestQueue = [];
