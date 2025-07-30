@@ -37,3 +37,16 @@ pnpm-lock.yaml
 .vscode/
 .history/
 
+# Node / VS Code
+out/
+dist/
+.vscode/
+*.vsix
+
+# Python
+__pycache__/
+*.egg-info/
+models/.cache/
+
+# Pixi
+.pixi/
