@@ -1,6 +1,7 @@
 # File: src/backend/tools/read_file.py
 from pathlib import Path
-from . import tool
+from backend.api import tool
+
 
 @tool("read_file", "Read any file in the workspace", {"path": "string"})
 def read_file(path: str):
