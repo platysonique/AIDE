@@ -55,14 +55,19 @@ class ToolRegistry:
         return self._tools[name](**kwargs)
 
     def serialize(self) -> List[dict]:
-        return [
-            {
-                "name": n,
-                "description": getattr(f, '__desc__', ''),
-                "args_schema": getattr(f, '__schema__', {})
-            }
-            for n, f in self._tools.items()
-        ]
+        # CRITICAL FIX: Add exception handling for serialization
+        try:
+            return [
+                {
+                    "name": n,
+                    "description": getattr(f, '__desc__', ''),
+                    "args_schema": getattr(f, '__schema__', {})
+                }
+                for n, f in self._tools.items()
+            ]
+        except Exception as e:
+            print(f"🔌 Tool registry serialization error: {e}")
+            return []  # Return empty array on failure
 
     def get_tool_names(self) -> List[str]:
         return list(self._tools.keys())
@@ -104,7 +109,6 @@ def should_use_tool_mode(message: str) -> bool:
 
     if any(pattern in message_lower for pattern in discussion_patterns):
         return False
-
     if any(pattern in message_lower for pattern in command_patterns):
         return True
 
@@ -128,7 +132,6 @@ def build_react_prompt_with_tools(message: str, context: dict, tools: List[dict]
     return f"""You are AIDE, an autonomous coding assistant.
 
 IMPORTANT: Only take Action if the user is giving you a direct command or request.
-
 If they're discussing, asking opinions, or expressing concerns, respond conversationally without invoking tools.
 
 Workspace Folders: {workspace_folders}
@@ -209,11 +212,11 @@ def load_existing_tools():
             tool_name = tool_file.stem
             spec = importlib.util.spec_from_file_location(tool_name, str(tool_file))
             module = importlib.util.module_from_spec(spec)
-
+            
             # Small delay for stability
             import time
             time.sleep(0.1)
-
+            
             spec.loader.exec_module(module)
             tools_loaded += 1
             print(f"✅ Successfully loaded tool: {tool_name}")
@@ -224,8 +227,7 @@ def load_existing_tools():
 
     print(f"📦 Tool loading complete: {tools_loaded} files processed")
 
-# [ALL YOUR EXISTING SEARCH PROVIDER FUNCTIONS]
-
+# [SEARCH PROVIDER FUNCTIONS]
 def search_perplexity(query):
     url = "https://api.perplexity.ai/search"
     headers = {"Authorization": f"Bearer {api_keys.get('perplexity_api_key', '')}"}
@@ -296,10 +298,10 @@ def hybrid_online_search(query):
         except Exception as e:
             last_error = f"{provider}: {str(e)}"
             continue
+
     return {"error": f"No provider returned a result. Last error: {last_error}"}
 
-# [ALL YOUR EXISTING AGENTIC INTENT PROCESSOR]
-
+# [AGENTIC INTENT PROCESSOR]
 class AgenticIntentProcessor:
     def __init__(self):
         self.intent_patterns = {
@@ -488,7 +490,7 @@ app.add_middleware(
 app.include_router(intent_router, prefix="/api/v1")
 
 # ============================================================================
-# WEBSOCKET ENDPOINT - WITH PROPER TOOL REGISTRY HANDLING
+# WEBSOCKET ENDPOINT - WITH BULLETPROOF ERROR HANDLING
 # ============================================================================
 
 @app.websocket("/ws")
@@ -504,19 +506,23 @@ async def websocket_endpoint(websocket: WebSocket):
         # Give time for component testing
         await asyncio.sleep(0.5)
 
+        # CRITICAL FIX: Wrap tool registry serialization
         try:
             tools = tool_registry.serialize()
             print(f"🔌 Tool registry: {len(tools)} tools found")
             print(f"🔌 Tool names: {tool_registry.get_tool_names()}")
         except Exception as e:
-            print(f"🔌 Tool registry error: {e}")
-            tools = []
+            print(f"🔌 Tool registry serialization failed: {e}")
+            traceback.print_exc()
+            tools = []  # Fallback to empty array
 
+        # CRITICAL FIX: Wrap model operations
         try:
             models = safe_list_available_models()
             print(f"🔌 Models: {len(models)} found")
         except Exception as e:
             print(f"🔌 Model listing error: {e}")
+            traceback.print_exc()
             models = []
 
         try:
@@ -524,6 +530,7 @@ async def websocket_endpoint(websocket: WebSocket):
             print(f"🔌 Current model: {current}")
         except Exception as e:
             print(f"🔌 Current model error: {e}")
+            traceback.print_exc()
             current = None
 
         await asyncio.sleep(0.2)
@@ -544,6 +551,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
         except Exception as e:
             print(f"🔌 Failed to send initial message: {e}")
+            traceback.print_exc()
+            # Send a minimal fallback message
             await websocket.send_json({
                 "type": "registry",
                 "tools": [],
@@ -563,8 +572,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     if should_use_tool_mode(message):
                         print("🛠️ Using tool mode")
-                        enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
-
+                        
+                        # CRITICAL FIX: Wrap tool serialization for prompt building
+                        try:
+                            enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
+                        except Exception as e:
+                            print(f"🔌 Tool serialization for prompt failed: {e}")
+                            enhanced_prompt = f"You are AIDE. User: {message}"
+                        
                         if is_valid_model_path(CURRENT_MODEL):
                             try:
                                 tokenizer, model = load_model(CURRENT_MODEL)
@@ -653,9 +668,16 @@ def tool(name: str, desc: str = "", schema: dict = None):
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
 
+                        # CRITICAL FIX: Wrap tool serialization in response
+                        try:
+                            serialized_tools = tool_registry.serialize()
+                        except Exception as e:
+                            print(f"🔌 Tool serialization for new tool response failed: {e}")
+                            serialized_tools = []
+
                         await websocket.send_json({
                             "type": "registry",
-                            "tools": tool_registry.serialize(),
+                            "tools": serialized_tools,
                             "message": f"Tool '{name}' created successfully",
                             "workspace_context": {
                                 "available_models": safe_list_available_models(),
@@ -666,6 +688,7 @@ def tool(name: str, desc: str = "", schema: dict = None):
 
                     except Exception as e:
                         print(f"❌ Tool creation failed: {e}")
+                        traceback.print_exc()
                         await websocket.send_json({
                             "type": "error",
                             "message": f"Failed to create tool: {str(e)}"
@@ -683,6 +706,7 @@ def tool(name: str, desc: str = "", schema: dict = None):
 
             except Exception as e:
                 print(f"❌ Message processing error: {e}")
+                traceback.print_exc()
                 try:
                     await websocket.send_json({
                         "type": "error",
@@ -693,9 +717,41 @@ def tool(name: str, desc: str = "", schema: dict = None):
 
     except WebSocketDisconnect:
         print("🔌 WebSocket disconnected normally")
+
     except Exception as e:
         print(f"🔌 CRITICAL WebSocket error: {e}")
         traceback.print_exc()
+
+# ============================================================================
+# ADD WEBSOCKET HEALTH CHECK ENDPOINT
+# ============================================================================
+
+@app.get("/health/websocket")
+async def websocket_health():
+    """Health check specifically for WebSocket functionality"""
+    try:
+        # Test tool registry serialization
+        tools = tool_registry.serialize()
+        
+        # Test model operations
+        models = safe_list_available_models()
+        current_model = CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None
+        
+        return {
+            "status": "ok",
+            "websocket_ready": True,
+            "tools_count": len(tools),
+            "models_count": len(models),
+            "current_model": current_model,
+            "message": "WebSocket endpoint is ready"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "websocket_ready": False,
+            "error": str(e),
+            "message": "WebSocket endpoint has issues"
+        }
 
 # ============================================================================
 # BULLETPROOF MODEL MANAGEMENT
@@ -735,8 +791,7 @@ except Exception as e:
     available_models = []
     CURRENT_MODEL = None
 
-# [ALL YOUR MODEL ENDPOINTS]
-
+# [ALL MODEL ENDPOINTS]
 @app.get("/models")
 async def api_list_models():
     models = safe_list_available_models()
@@ -812,8 +867,7 @@ async def api_current_model():
         "valid": True
     }
 
-# [ALL YOUR SPEECH ENDPOINTS]
-
+# [ALL SPEECH ENDPOINTS]
 @app.post("/speech/recognize")
 async def speech_recognize(request: Request):
     try:
@@ -840,6 +894,7 @@ async def speech_recognize(request: Request):
                 if not model_path:
                     import urllib.request
                     import zipfile
+
                     model_url = "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
                     model_dir = os.path.expanduser("~/.cache/vosk-models")
                     os.makedirs(model_dir, exist_ok=True)
@@ -871,6 +926,7 @@ async def speech_recognize(request: Request):
                           frames_per_buffer=8000)
 
             print(f"🎤 Recording for {timeout} seconds...")
+
             transcript = ""
             frames_to_read = int(16000 / 8000 * timeout)
 
@@ -1025,9 +1081,9 @@ async def speech_status():
     except ImportError:
         pass
 
-    speech_ready = (status["vosk_available"] and
-                   status["coqui_tts_available"] and
-                   status["pyaudio_available"] and
+    speech_ready = (status["vosk_available"] and 
+                   status["coqui_tts_available"] and 
+                   status["pyaudio_available"] and 
                    status["sounddevice_available"])
 
     return {
@@ -1040,11 +1096,16 @@ async def speech_status():
         ]
     }
 
-# [ALL YOUR LLM CONVERSATION CODE]
-
+# [ALL LLM CONVERSATION CODE]
 async def generate_with_tool_calling(model, tokenizer, message, context):
     try:
-        available_tools = tool_registry.serialize()
+        # CRITICAL FIX: Wrap tool registry serialization
+        try:
+            available_tools = tool_registry.serialize()
+        except Exception as e:
+            print(f"⚠️ Tool serialization in generate_with_tool_calling failed: {e}")
+            available_tools = []
+
         search_tools = list(PROVIDER_FUNCS.keys())
         current_file = context.get("currentFile", {})
         workspace = context.get("workspace", {})
@@ -1162,8 +1223,7 @@ async def api_chat(request: Request):
             "conversation_type": "error"
         }
 
-# [ALL YOUR OTHER ENDPOINTS]
-
+# [ALL OTHER ENDPOINTS]
 @app.get("/health")
 async def health():
     return {
