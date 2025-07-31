@@ -98,7 +98,7 @@ def load_existing_tools():
     if not tools_dir.exists():
         print("🔍 Tools directory doesn't exist, creating it...")
         tools_dir.mkdir(exist_ok=True)
-        return
+        
 
     print(f"🔍 Loading tools from: {tools_dir}")
 
