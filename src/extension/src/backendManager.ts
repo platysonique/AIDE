@@ -79,7 +79,7 @@ export class EnhancedBackendManager {
             this.setupProcessMonitoring();
 
             // FIXED: Wait for server with longer timeout (45 seconds instead of 30)
-            const serverStarted = await this.waitForServerReady(45000);
+            const serverStarted = await this.waitForServerReady(120000);
 
             if (serverStarted) {
                 this.startEnhancedHealthMonitoring(context);
@@ -248,7 +248,7 @@ export class EnhancedBackendManager {
             const response = await fetch(`http://${this.serverHost}:${this.serverPort}/health`, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' },
-                signal: AbortSignal.timeout(2000) // 2 second timeout
+                signal: AbortSignal.timeout(10000) // 2 second timeout
             });
 
             if (response.ok) {

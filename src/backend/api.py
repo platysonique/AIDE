@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Callable
 import re
 import traceback
+from contextlib import asynccontextmanager
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -42,7 +43,7 @@ class ToolRegistry:
         self._initialized = False
 
     def register(self, name: str, func: Callable[..., Any], desc: str = "", schema: dict = None):
-        func.__desc__ = desc  
+        func.__desc__ = desc
         func.__schema__ = schema or {}
         self._tools[name] = func
         print(f"🛠️ Registered tool: {name} (Total: {len(self._tools)})")
@@ -56,8 +57,8 @@ class ToolRegistry:
     def serialize(self) -> List[dict]:
         return [
             {
-                "name": n, 
-                "description": getattr(f, '__desc__', ''), 
+                "name": n,
+                "description": getattr(f, '__desc__', ''),
                 "args_schema": getattr(f, '__schema__', {})
             }
             for n, f in self._tools.items()
@@ -89,26 +90,24 @@ def tool(name: str, desc: str = "", schema: dict = None):
 
 def should_use_tool_mode(message: str) -> bool:
     message_lower = message.lower()
-    
     discussion_patterns = [
-        "i think", "i believe", "i'm worried", "i'm concerned", 
+        "i think", "i believe", "i'm worried", "i'm concerned",
         "this might", "this could", "this may", "what if",
         "do you think", "opinion", "thoughts on", "feelings about",
         "problem with", "issue with", "concerns about", "discuss"
     ]
-    
     command_patterns = [
         "i want you to", "i need you to", "please", "can you",
         "go ahead and", "help me", "show me the", "read the",
         "search for", "find the", "analyze the", "check the"
     ]
-    
+
     if any(pattern in message_lower for pattern in discussion_patterns):
         return False
-    
+
     if any(pattern in message_lower for pattern in command_patterns):
         return True
-    
+
     if "create" in message_lower:
         command_context = any(word in message_lower for word in [
             "want", "need", "should", "please", "can you", "help"
@@ -116,20 +115,20 @@ def should_use_tool_mode(message: str) -> bool:
         discussion_context = any(word in message_lower for word in [
             "think", "might", "could", "may", "problem", "issue", "concern"
         ])
-        
         if discussion_context:
             return False
         return command_context
-    
+
     return False
 
 def build_react_prompt_with_tools(message: str, context: dict, tools: List[dict]) -> str:
     workspace_folders = context.get('workspace_folders', [])
     active_file = context.get('active_file', 'None')
-    
+
     return f"""You are AIDE, an autonomous coding assistant.
 
-IMPORTANT: Only take Action if the user is giving you a direct command or request. 
+IMPORTANT: Only take Action if the user is giving you a direct command or request.
+
 If they're discussing, asking opinions, or expressing concerns, respond conversationally without invoking tools.
 
 Workspace Folders: {workspace_folders}
@@ -154,21 +153,19 @@ Action: propose_new_tool{{"name": "tool_name", "code": "complete python code wit
 Current query analysis: {message}"""
 
 async def api_chat_internal(message: str, context: dict) -> dict:
-    system_prompt = """You are AIDE, a helpful coding assistant. 
-    Have a natural conversation with the user. 
-    Only mention tools or capabilities if directly asked about them."""
-    
+    system_prompt = """You are AIDE, a helpful coding assistant.
+Have a natural conversation with the user.
+Only mention tools or capabilities if directly asked about them."""
+
     if CURRENT_MODEL and isinstance(CURRENT_MODEL, (str, os.PathLike)) and os.path.exists(str(CURRENT_MODEL)):
         try:
             tokenizer, model = load_model(CURRENT_MODEL)
-            
             input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"
-            
             input_data = tokenizer(input_prompt, return_tensors="pt", truncation=True, max_length=2048)
-            
+
             if hasattr(model, 'device'):
                 input_data = {k: v.to(model.device) for k, v in input_data.items()}
-            
+
             output_tokens = model.generate(
                 **input_data,
                 max_new_tokens=512,
@@ -177,17 +174,16 @@ async def api_chat_internal(message: str, context: dict) -> dict:
                 top_p=0.95,
                 pad_token_id=tokenizer.eos_token_id
             )
-            
+
             response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-            
             if "AIDE:" in response_text:
                 response_text = response_text.split("AIDE:")[-1].strip()
-            
+
             return {"response": response_text, "type": "conversation"}
-            
+
         except Exception as e:
             print(f"⚠️ Conversational model failed: {e}")
-    
+
     return {
         "response": f"I understand you're asking about: {message}. How can I help you with this?",
         "type": "conversation"
@@ -200,34 +196,36 @@ def load_existing_tools():
         print("🔍 Tools directory doesn't exist, creating it...")
         tools_dir.mkdir(exist_ok=True)
         return
-    
+
     print(f"🔍 Loading tools from: {tools_dir}")
     tools_loaded = 0
-    
+
     for tool_file in tools_dir.glob("*.py"):
         if tool_file.name == "__init__.py":
             continue
-            
+
         try:
             print(f"📦 Loading tool file: {tool_file}")
             tool_name = tool_file.stem
             spec = importlib.util.spec_from_file_location(tool_name, str(tool_file))
             module = importlib.util.module_from_spec(spec)
-            
+
             # Small delay for stability
             import time
             time.sleep(0.1)
-            
+
             spec.loader.exec_module(module)
             tools_loaded += 1
             print(f"✅ Successfully loaded tool: {tool_name}")
+
         except Exception as e:
             print(f"❌ Failed to load tool {tool_file}: {e}")
             traceback.print_exc()
-    
+
     print(f"📦 Tool loading complete: {tools_loaded} files processed")
 
 # [ALL YOUR EXISTING SEARCH PROVIDER FUNCTIONS]
+
 def search_perplexity(query):
     url = "https://api.perplexity.ai/search"
     headers = {"Authorization": f"Bearer {api_keys.get('perplexity_api_key', '')}"}
@@ -301,6 +299,7 @@ def hybrid_online_search(query):
     return {"error": f"No provider returned a result. Last error: {last_error}"}
 
 # [ALL YOUR EXISTING AGENTIC INTENT PROCESSOR]
+
 class AgenticIntentProcessor:
     def __init__(self):
         self.intent_patterns = {
@@ -430,8 +429,53 @@ class AgenticIntentProcessor:
 
 agentic_processor = AgenticIntentProcessor()
 
-# --- FastAPI app ---
-app = FastAPI(title="AIDE Backend with Dynamic Models, Agentic Features & Hybrid Search")
+# ============================================================================
+# MODERN LIFESPAN APPROACH - REPLACING DEPRECATED STARTUP EVENT
+# ============================================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    print("🚀 AIDE Backend starting with bulletproof tool loading...")
+    
+    # Give the system time to stabilize
+    import time
+    time.sleep(1.0)
+    
+    # Load tools from directory - this will add to existing registry
+    print(f"📊 Pre-loading tool count: {len(tool_registry.get_tool_names())}")
+    print(f"📋 Pre-loading tools: {tool_registry.get_tool_names()}")
+    
+    load_existing_tools()
+    
+    # Give tools time to register
+    time.sleep(0.5)
+    
+    # Final verification with detailed debugging
+    final_tool_count = len(tool_registry.get_tool_names())
+    final_tool_names = tool_registry.get_tool_names()
+    
+    print(f"🛠️ FINAL TOOL COUNT: {final_tool_count} tools registered")
+    print(f"📋 FINAL TOOL NAMES: {final_tool_names}")
+    
+    # Debug the registry state
+    print(f"🔍 Registry internal state: {len(tool_registry._tools)} tools in _tools dict")
+    print(f"🔍 Registry keys: {list(tool_registry._tools.keys())}")
+    
+    print(f"🔌 WebSocket enabled with generous timeout handling")
+    print(f"🤖 Model system: {'✅ Ready' if is_valid_model_path(CURRENT_MODEL) else '⚠️ No valid models'}")
+    
+    yield  # This is where the app runs
+    
+    # Shutdown (optional cleanup)
+    print("🛑 AIDE Backend shutting down gracefully...")
+    # Add any cleanup code here if needed
+
+# --- FastAPI app with modern lifespan ---
+app = FastAPI(
+    title="AIDE Backend with Dynamic Models, Agentic Features & Hybrid Search",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -451,16 +495,15 @@ app.include_router(intent_router, prefix="/api/v1")
 async def websocket_endpoint(websocket: WebSocket):
     try:
         print("🔌 WebSocket connection attempt starting...")
-        
         await websocket.accept(extra_headers=[
             ("Access-Control-Allow-Origin", "*"),
             ("Access-Control-Allow-Credentials", "true")
         ])
         print("🔌 WebSocket accepted successfully!")
-        
+
         # Give time for component testing
         await asyncio.sleep(0.5)
-        
+
         try:
             tools = tool_registry.serialize()
             print(f"🔌 Tool registry: {len(tools)} tools found")
@@ -468,26 +511,26 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception as e:
             print(f"🔌 Tool registry error: {e}")
             tools = []
-        
+
         try:
             models = safe_list_available_models()
             print(f"🔌 Models: {len(models)} found")
         except Exception as e:
             print(f"🔌 Model listing error: {e}")
             models = []
-        
+
         try:
             current = CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None
             print(f"🔌 Current model: {current}")
         except Exception as e:
             print(f"🔌 Current model error: {e}")
             current = None
-        
+
         await asyncio.sleep(0.2)
-        
+
         try:
             initial_message = {
-                "type": "registry", 
+                "type": "registry",
                 "tools": tools,
                 "workspace_context": {
                     "available_models": models,
@@ -498,6 +541,7 @@ async def websocket_endpoint(websocket: WebSocket):
             }
             await websocket.send_json(initial_message)
             print("🔌 Initial message sent successfully! 🎉")
+
         except Exception as e:
             print(f"🔌 Failed to send initial message: {e}")
             await websocket.send_json({
@@ -505,23 +549,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 "tools": [],
                 "message": "Connected with limited functionality"
             })
-        
+
         # Message processing loop
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
                 msg_type = data.get("type")
-                
+
                 if msg_type == "query":
                     message = data.get("message", "")
                     context = data.get("context", {})
-                    
                     print(f"🤖 Processing query: {message[:50]}...")
-                    
+
                     if should_use_tool_mode(message):
                         print("🛠️ Using tool mode")
                         enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
-                        
+
                         if is_valid_model_path(CURRENT_MODEL):
                             try:
                                 tokenizer, model = load_model(CURRENT_MODEL)
@@ -538,58 +581,57 @@ async def websocket_endpoint(websocket: WebSocket):
                             used_tools = []
                             actions = []
                             mode = "tool_fallback"
-                            
+
                         response_data = {
                             "response": response,
                             "tools_invoked": used_tools,
                             "actions": actions
                         }
+
                     else:
                         print("💬 Using chat mode")
                         response_data = await api_chat_internal(message, context)
                         mode = "chat"
-                    
+
                     await websocket.send_json({
-                        "type": "response", 
+                        "type": "response",
                         "data": response_data,
                         "mode": mode
                     })
-                
+
                 elif msg_type == "invoke":
                     tool_name = data.get("tool")
                     args = data.get("args", {})
-                    
                     print(f"🔧 Invoking tool: {tool_name}")
-                    
+
                     if tool_registry.exists(tool_name):
                         try:
                             result = tool_registry.call(tool_name, **args)
                             await websocket.send_json({
                                 "type": "tool_response",
-                                "tool": tool_name, 
+                                "tool": tool_name,
                                 "result": result
                             })
                         except Exception as e:
                             await websocket.send_json({
-                                "type": "error", 
+                                "type": "error",
                                 "message": f"Tool {tool_name} failed: {str(e)}"
                             })
                     else:
                         await websocket.send_json({
-                            "type": "error", 
+                            "type": "error",
                             "message": f"Tool {tool_name} not found. Available: {tool_registry.get_tool_names()}"
                         })
-                        
+
                 elif msg_type == "propose_new_tool":
                     try:
                         name = data.get("name")
                         code = data.get("code")
-                        
                         print(f"🏗️ Creating tool: {name}")
-                        
+
                         tools_dir = Path(__file__).parent / "tools"
                         tools_dir.mkdir(exist_ok=True)
-                        
+
                         init_file = tools_dir / "__init__.py"
                         if not init_file.exists():
                             init_file.write_text(f"""# Auto-generated tools package
@@ -601,16 +643,16 @@ def tool(name: str, desc: str = "", schema: dict = None):
         return fn
     return wrapper
 """)
-                        
+
                         tool_file = tools_dir / f"{name}.py"
                         tool_file.write_text(code, encoding="utf-8")
-                        
+
                         await asyncio.sleep(0.1)
-                        
+
                         spec = importlib.util.spec_from_file_location(name, str(tool_file))
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
-                        
+
                         await websocket.send_json({
                             "type": "registry",
                             "tools": tool_registry.serialize(),
@@ -621,22 +663,24 @@ def tool(name: str, desc: str = "", schema: dict = None):
                                 "total_tools": len(tool_registry.get_tool_names())
                             }
                         })
-                        
+
                     except Exception as e:
                         print(f"❌ Tool creation failed: {e}")
                         await websocket.send_json({
-                            "type": "error", 
+                            "type": "error",
                             "message": f"Failed to create tool: {str(e)}"
                         })
-                        
+
             except asyncio.TimeoutError:
                 print("⏰ WebSocket message timeout - client may be slow")
                 continue
+
             except json.JSONDecodeError as e:
                 await websocket.send_json({
                     "type": "error",
                     "message": f"Invalid JSON: {str(e)}"
                 })
+
             except Exception as e:
                 print(f"❌ Message processing error: {e}")
                 try:
@@ -646,7 +690,7 @@ def tool(name: str, desc: str = "", schema: dict = None):
                     })
                 except:
                     print("🔌 Failed to send error - connection may be dead")
-                        
+
     except WebSocketDisconnect:
         print("🔌 WebSocket disconnected normally")
     except Exception as e:
@@ -692,6 +736,7 @@ except Exception as e:
     CURRENT_MODEL = None
 
 # [ALL YOUR MODEL ENDPOINTS]
+
 @app.get("/models")
 async def api_list_models():
     models = safe_list_available_models()
@@ -723,7 +768,7 @@ async def api_choose_model(request: Request):
     try:
         CURRENT_MODEL = model_name
         validate_current_model()
-        
+
         if is_valid_model_path(CURRENT_MODEL):
             tokenizer, model = load_model(CURRENT_MODEL)
             print(f"✅ Model loaded: {model_name}")
@@ -737,6 +782,7 @@ async def api_choose_model(request: Request):
                 "error": f"Model path invalid: {model_name}",
                 "current": CURRENT_MODEL
             }
+
     except Exception as e:
         return {
             "error": f"Failed to load model {model_name}: {str(e)}",
@@ -767,6 +813,7 @@ async def api_current_model():
     }
 
 # [ALL YOUR SPEECH ENDPOINTS]
+
 @app.post("/speech/recognize")
 async def speech_recognize(request: Request):
     try:
@@ -788,8 +835,8 @@ async def speech_recognize(request: Request):
                     "./models/vosk-model-en-us-0.22",
                     os.path.expanduser("~/.vosk/models/vosk-model-en-us-0.22")
                 ]
-
                 model_path = next((p for p in possible_paths if os.path.exists(p)), None)
+
                 if not model_path:
                     import urllib.request
                     import zipfile
@@ -797,11 +844,14 @@ async def speech_recognize(request: Request):
                     model_dir = os.path.expanduser("~/.cache/vosk-models")
                     os.makedirs(model_dir, exist_ok=True)
                     zip_path = os.path.join(model_dir, "vosk-model-en-us-0.22.zip")
+
                     if not os.path.exists(zip_path):
                         print(f"🔄 Downloading Vosk model from {model_url}...")
                         urllib.request.urlretrieve(model_url, zip_path)
-                        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                            zip_ref.extractall(model_dir)
+
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(model_dir)
+
                     model_path = os.path.join(model_dir, "vosk-model-en-us-0.22")
 
                     if not os.path.exists(model_path):
@@ -819,10 +869,11 @@ async def speech_recognize(request: Request):
                           rate=16000,
                           input=True,
                           frames_per_buffer=8000)
-            print(f"🎤 Recording for {timeout} seconds...")
 
+            print(f"🎤 Recording for {timeout} seconds...")
             transcript = ""
             frames_to_read = int(16000 / 8000 * timeout)
+
             for _ in range(frames_to_read):
                 try:
                     data_chunk = stream.read(8000, exception_on_overflow=False)
@@ -990,6 +1041,7 @@ async def speech_status():
     }
 
 # [ALL YOUR LLM CONVERSATION CODE]
+
 async def generate_with_tool_calling(model, tokenizer, message, context):
     try:
         available_tools = tool_registry.serialize()
@@ -1008,7 +1060,7 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         )
 
         input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
-        
+
         if hasattr(model, 'device'):
             input_data = {k: v.to(model.device) for k, v in input_data.items()}
 
@@ -1022,11 +1074,13 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         )
 
         response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+
         if "AIDE:" in response_text:
             response_text = response_text.split("AIDE:")[-1].strip()
 
         tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
         tools_found = tool_pattern.findall(response_text)
+
         used_tools = []
         actions = []
 
@@ -1039,7 +1093,7 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
                     response_text += f"\n\n**{tool} Result:**\n{result}"
                 except Exception as e:
                     response_text += f"\n\n*{tool} error: {str(e)}*"
-                    
+
             elif tool_registry.exists(tool):
                 try:
                     result = tool_registry.call(tool)
@@ -1086,12 +1140,13 @@ async def api_chat(request: Request):
                 result["fallback_reason"] = f"Model error: {str(model_err)}"
                 result["conversation_type"] = "regex_fallback"
                 return result
+
         else:
             print("📝 No valid model, using regex processor")
             result = agentic_processor.process_intent(message, context)
             result["fallback_reason"] = "No valid model loaded"
             result["conversation_type"] = "regex_fallback"
-            
+
             search_keywords = ["search", "find", "look up", "what is", "who is", "when did", "how to"]
             if any(keyword in message.lower() for keyword in search_keywords):
                 search_result = hybrid_online_search(message)
@@ -1108,10 +1163,11 @@ async def api_chat(request: Request):
         }
 
 # [ALL YOUR OTHER ENDPOINTS]
+
 @app.get("/health")
 async def health():
     return {
-        "status": "ok", 
+        "status": "ok",
         "message": "AIDE backend running",
         "websocket_enabled": True,
         "tools_registered": len(tool_registry.get_tool_names()),
@@ -1139,6 +1195,7 @@ async def api_ingest_document(request: Request):
             "file_path": file_path,
             "file_name": file_name
         }
+
     except Exception as e:
         return {
             "status": "error",
@@ -1186,48 +1243,15 @@ async def api_online_search(request: Request):
     result = hybrid_online_search(query)
     return result
 
-# ============================================================================
-# STARTUP EVENT - BULLETPROOF TOOL LOADING WITH DEBUG INFO
-# ============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    print("🚀 AIDE Backend starting with bulletproof tool loading...")
-    
-    # Give the system time to stabilize
-    import time
-    time.sleep(1.0)
-    
-    # Load tools from directory - this will add to existing registry
-    print(f"📊 Pre-loading tool count: {len(tool_registry.get_tool_names())}")
-    print(f"📋 Pre-loading tools: {tool_registry.get_tool_names()}")
-    
-    load_existing_tools()
-    
-    # Give tools time to register
-    time.sleep(0.5)
-    
-    # Final verification with detailed debugging
-    final_tool_count = len(tool_registry.get_tool_names())
-    final_tool_names = tool_registry.get_tool_names()
-    
-    print(f"🛠️ FINAL TOOL COUNT: {final_tool_count} tools registered")
-    print(f"📋 FINAL TOOL NAMES: {final_tool_names}")
-    
-    # Debug the registry state
-    print(f"🔍 Registry internal state: {len(tool_registry._tools)} tools in _tools dict")
-    print(f"🔍 Registry keys: {list(tool_registry._tools.keys())}")
-    
-    print(f"🔌 WebSocket enabled with generous timeout handling")
-    print(f"🤖 Model system: {'✅ Ready' if is_valid_model_path(CURRENT_MODEL) else '⚠️ No valid models'}")
-
 if __name__ == "__main__":
     host = os.getenv("AIDE_HOST", config.get("host", "127.0.0.1"))
     port = int(os.getenv("AIDE_PORT", config.get("port", 8000)))
+
     print(f"🚀 Starting AIDE on {host}:{port}")
     print(f"🎤 Speech functionality: Vosk + Coqui TTS enabled")
     print(f"🤖 Models available: {len(safe_list_available_models())}")
     print(f"🎯 Current model: {CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else 'None (fallback mode)'}")
     print(f"🔌 WebSocket: ✅ Generous timeout + bulletproof error handling")
     print(f"🛠️ Dynamic tools: ✅ Bulletproof registration system")
+
     uvicorn.run(app, host=host, port=port)
