@@ -196,20 +196,6 @@ def search_perplexity(query):
     except Exception as e:
         return f"Perplexity search failed: {str(e)}"
 
-def search_searxng(query):
-    try:
-        endpoint = config.get("searxng_endpoint", "")
-        if not endpoint:
-            return "SearXNG endpoint not configured"
-        url = f"{endpoint}/search?q={query}&format=json"
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        snippet = results[0].get("snippet") if results else "No results."
-        return snippet
-    except Exception as e:
-        return f"SearXNG search failed: {str(e)}"
-
 def search_duckduckgo(query):
     try:
         url = f"https://api.duckduckgo.com/?q={query}&format=json"
@@ -262,7 +248,6 @@ def search_open_meteo(query):
 
 PROVIDER_FUNCS = {
     "perplexity": search_perplexity,
-    "searxng": search_searxng,
     "duckduckgo": search_duckduckgo,
     "wikipedia": search_wikipedia,
     "wolframalpha": search_wolframalpha,
@@ -1322,6 +1307,36 @@ async def speech_status():
             "Install missing components with: pixi add vosk-api coqui-tts pyaudio sounddevice soundfile"
         ]
     }
+    
+@app.post("/force-shutdown")
+async def force_shutdown():
+    """Force shutdown endpoint that kills the process"""
+    import os
+    import signal
+    
+    print("🛑 FORCE SHUTDOWN REQUESTED - TERMINATING NOW")
+    
+    # Close all WebSocket connections immediately
+    for connection in active_connections.copy():
+        try:
+            await connection.close()
+        except:
+            pass
+    active_connections.clear()
+    
+    # Set shutdown event
+    shutdown_event.set()
+    
+    # Give it 1 second then force kill
+    asyncio.create_task(delayed_force_exit())
+    
+    return {"status": "shutting_down", "message": "Process will terminate in 1 second"}
+
+async def delayed_force_exit():
+    """Force exit after brief delay"""
+    await asyncio.sleep(1.0)
+    print("🛑 FORCE KILLING PROCESS NOW")
+    os._exit(0)  # Nuclear option - bypasses all cleanup
 
 # ============================================================================
 # MAIN ENTRY POINT

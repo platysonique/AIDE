@@ -12,7 +12,6 @@ online_search: perplexity
 
 # Ordered fallback search list (tries next if previous fails)
 fallback_order:
-  - searxng
   - duckduckgo
   - wikipedia
   - wolframalpha
