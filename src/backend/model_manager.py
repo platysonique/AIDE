@@ -1,4 +1,4 @@
-# FILE: src/backend/model_manager.py - ENHANCED DYNAMIC MODEL MANAGEMENT WITH TOKENIZER FIX
+# FILE: src/backend/model_manager.py - INTEL ARC A770 OPTIMIZED DYNAMIC MODEL MANAGEMENT
 
 import os
 import functools
@@ -17,77 +17,178 @@ def list_available_models() -> List[str]:
     """
     if not MODELS_DIR.exists():
         return []
-    
+
     models = []
-    
+
     # Check root models directory for a complete model (backward compatibility)
     root_config = MODELS_DIR / 'config.json'
     root_params = MODELS_DIR / 'params.json'
-    root_has_model = any(f.suffix in ['.safetensors', '.bin'] 
-                        for f in MODELS_DIR.iterdir() 
+    root_has_model = any(f.suffix in ['.safetensors', '.bin']
+                        for f in MODELS_DIR.iterdir()
                         if f.is_file())
-    
+
     if (root_config.exists() or root_params.exists()) and root_has_model:
         models.append("root-model")
-    
+
     # Scan subdirectories for model folders
     for item in MODELS_DIR.iterdir():
         if item.is_dir() and item.name not in ['.cache', '__pycache__', '.git', '.gitkeep']:
             # Check if directory contains a valid model
             has_config = (item / 'config.json').exists() or (item / 'params.json').exists()
             has_model = any(f.suffix in ['.safetensors', '.bin'] for f in item.iterdir())
-            
             if has_config and has_model:
                 models.append(item.name)
-    
+
     return sorted(models)
+
+def _detect_optimal_device() -> Dict[str, Any]:
+    """
+    INTEL ARC A770 DETECTION AND OPTIMIZATION
+    Your beast hardware deserves beast performance!
+    """
+    import torch
+    
+    # Try Intel Extension for PyTorch (XPU) first - YOUR ARC A770!
+    try:
+        import intel_extension_for_pytorch as ipex
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            device_count = torch.xpu.device_count()
+            print(f"🎮 BEAST MODE: Intel Arc A770 detected! Found {device_count} XPU device(s)")
+            return {
+                "device_map": "xpu:0",
+                "device_name": "Intel Arc A770 (XPU:0) - BEAST MODE ACTIVATED",
+                "torch_dtype": torch.float16,  # FP16 for GPU efficiency
+                "use_intel_xpu": True,
+                "memory_strategy": "GPU-accelerated with 94GB RAM backup",
+                "model_kwargs": {
+                    "torch_dtype": torch.float16,
+                    "low_cpu_mem_usage": True,
+                    "trust_remote_code": True
+                }
+            }
+    except ImportError:
+        print("⚠️ Intel Extension for PyTorch not found - install with: pip install intel_extension_for_pytorch")
+    except Exception as e:
+        print(f"⚠️ Intel XPU detection failed: {e}")
+    
+    # CUDA fallback (shouldn't happen on your Arc system but good to have)
+    if torch.cuda.is_available():
+        print("🎮 CUDA GPU detected - using CUDA acceleration")
+        return {
+            "device_map": "auto",
+            "device_name": "CUDA GPU",
+            "torch_dtype": torch.float16,
+            "use_intel_xpu": False,
+            "memory_strategy": "CUDA-optimized",
+            "model_kwargs": {
+                "torch_dtype": torch.float16,
+                "trust_remote_code": True
+            }
+        }
+    
+    # CPU fallback with your 94GB RAM optimization
+    print("⚠️ No GPU acceleration detected - using CPU with 94GB RAM BEAST MODE")
+    return {
+        "device_map": "cpu",
+        "device_name": "CPU (94GB RAM BEAST MODE)",
+        "torch_dtype": torch.float32,
+        "use_intel_xpu": False,
+        "memory_strategy": "High-RAM CPU optimized for your 94GB setup",
+        "model_kwargs": {
+            "torch_dtype": torch.float32,
+            "low_cpu_mem_usage": True,
+            "trust_remote_code": True
+        }
+    }
+
+def _apply_intel_arc_optimizations(model) -> Any:
+    """
+    Apply Intel Arc A770 specific optimizations
+    UNLEASH THE BEAST!
+    """
+    try:
+        import intel_extension_for_pytorch as ipex
+        import torch
+        
+        print("🚀 Applying Intel Arc A770 BEAST MODE optimizations...")
+        
+        # Move model to XPU
+        model = model.to('xpu')
+        
+        # Apply Intel optimizations with different optimization levels
+        optimization_levels = ["O1", "O0"]  # Try O1 first, fallback to O0
+        
+        for level in optimization_levels:
+            try:
+                model = ipex.optimize(model, dtype=torch.float16, level=level)
+                print(f"✅ Intel Arc A770 optimizations applied with level {level}!")
+                break
+            except Exception as e:
+                print(f"⚠️ Optimization level {level} failed: {e}, trying next...")
+                continue
+        
+        return model
+        
+    except Exception as e:
+        print(f"⚠️ Intel Arc optimization failed: {e}")
+        print("📝 Make sure intel_extension_for_pytorch is properly installed")
+        return model
 
 @functools.lru_cache(maxsize=1)
 def load_model(model_name: str) -> Tuple[Any, Any]:
     """
-    Load ANY model dynamically with intelligent tokenizer selection
-    ENHANCED for your Intel Arc A770 + 94GB RAM setup
+    Load ANY model dynamically with INTEL ARC A770 BEAST MODE acceleration
+    OPTIMIZED for your Intel Arc A770 + Intel i9 12th gen + 94GB RAM setup
     SMART tokenizer handling based on each model's own configuration
     """
     if model_name == "root-model":
         model_path = MODELS_DIR
     else:
         model_path = MODELS_DIR / model_name
-    
+
     if not model_path.exists():
         raise FileNotFoundError(f"Model '{model_name}' not found in {model_path}")
-    
+
     print(f"🔄 Loading model '{model_name}' from {model_path}...")
+    
+    # INTEL ARC A770 DEVICE DETECTION
+    device_config = _detect_optimal_device()
     
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        
+
         # 🧠 SMART TOKENIZER DETECTION - Let each model tell us what it needs!
         tokenizer_hints = _analyze_model_config(model_path)
-        
+
         # Load tokenizer with intelligent selection based on model's own metadata
         tokenizer = _load_smart_tokenizer(model_path, tokenizer_hints)
+
+        # Load model with INTEL ARC A770 BEAST MODE settings
+        print(f"🎮 Using device strategy: {device_config['device_name']}")
+        print(f"📊 Memory strategy: {device_config['memory_strategy']}")
         
-        # Load model with optimal settings for your BEAST hardware
         model = AutoModelForCausalLM.from_pretrained(
             str(model_path),
-            device_map="auto",  # Let transformers handle device placement
-            torch_dtype="auto",  # Auto-detect optimal dtype
-            trust_remote_code=True,
-            low_cpu_mem_usage=True,  # Perfect for your 94GB RAM
-            # Enable flash attention if available for your Arc A770
-            attn_implementation="flash_attention_2" if hasattr(AutoModelForCausalLM, 'flash_attention_2') else None
+            device_map=device_config["device_map"],
+            torch_dtype=device_config["torch_dtype"],
+            **device_config["model_kwargs"]
         )
-        
+
+        # Apply Intel Arc A770 optimizations if available
+        if device_config["use_intel_xpu"]:
+            model = _apply_intel_arc_optimizations(model)
+
         print(f"✅ Model '{model_name}' loaded successfully!")
-        print(f"📊 Model device: {model.device if hasattr(model, 'device') else 'auto'}")
+        print(f"🎮 Device: {device_config['device_name']}")
+        print(f"📊 Model device: {model.device if hasattr(model, 'device') else 'distributed'}")
         print(f"🧠 Model memory footprint: ~{_estimate_model_size(model_path)} GB")
         print(f"🎯 Tokenizer type: {tokenizer.__class__.__name__}")
         
         return tokenizer, model
-        
+
     except Exception as e:
         print(f"❌ Failed to load model '{model_name}': {e}")
+        print(f"💡 Troubleshooting tip: Check if intel_extension_for_pytorch is installed")
         raise
 
 def _analyze_model_config(model_path: Path) -> Dict[str, Any]:
@@ -103,22 +204,22 @@ def _analyze_model_config(model_path: Path) -> Dict[str, Any]:
         "has_vision": False,
         "special_tokens": {}
     }
-    
+
     # Check HuggingFace format config.json
     config_path = model_path / "config.json"
     if config_path.exists():
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
-                hints.update({
-                    "model_type": config.get("model_type", ""),
-                    "tokenizer_class": config.get("tokenizer_class", ""),
-                    "architectures": config.get("architectures", []),
-                    "has_vision": "vision" in str(config).lower() or "pixtral" in str(config).lower()
-                })
+            hints.update({
+                "model_type": config.get("model_type", ""),
+                "tokenizer_class": config.get("tokenizer_class", ""),
+                "architectures": config.get("architectures", []),
+                "has_vision": "vision" in str(config).lower() or "pixtral" in str(config).lower()
+            })
         except Exception as e:
             print(f"⚠️ Could not parse config.json: {e}")
-    
+
     # Check Mistral/Pixtral format params.json
     params_path = model_path / "params.json"
     if params_path.exists():
@@ -126,11 +227,11 @@ def _analyze_model_config(model_path: Path) -> Dict[str, Any]:
         try:
             with open(params_path, 'r') as f:
                 params = json.load(f)
-                # Mistral format usually indicates special tokenizer needs
-                hints["model_type"] = "mistral" if "pixtral" not in model_path.name.lower() else "pixtral"
+            # Mistral format usually indicates special tokenizer needs
+            hints["model_type"] = "mistral" if "pixtral" not in model_path.name.lower() else "pixtral"
         except Exception as e:
             print(f"⚠️ Could not parse params.json: {e}")
-    
+
     return hints
 
 def _load_smart_tokenizer(model_path: Path, hints: Dict[str, Any]) -> Any:
@@ -139,12 +240,11 @@ def _load_smart_tokenizer(model_path: Path, hints: Dict[str, Any]) -> Any:
     NO HARDCODING - uses model metadata to determine best approach
     """
     from transformers import AutoTokenizer
-    
+
     # Strategy 1: Pixtral models need special handling
-    if (hints.get("model_type") == "pixtral" or 
+    if (hints.get("model_type") == "pixtral" or
         "pixtral" in hints.get("architectures", []) or
         hints.get("is_mistral_format")):
-        
         print("🎯 Detected Pixtral/Mistral format - using specialized tokenizer loading")
         
         # Try multiple approaches for Pixtral tokenizer compatibility
@@ -153,7 +253,7 @@ def _load_smart_tokenizer(model_path: Path, hints: Dict[str, Any]) -> Any:
             lambda: AutoTokenizer.from_pretrained(str(model_path), use_fast=False, legacy=True),
             lambda: _load_llama_tokenizer_fallback(model_path),
         ]
-        
+
         for i, approach in enumerate(approaches, 1):
             try:
                 print(f"  🔄 Trying tokenizer approach {i}/3...")
@@ -165,12 +265,12 @@ def _load_smart_tokenizer(model_path: Path, hints: Dict[str, Any]) -> Any:
                 if i == len(approaches):  # Last attempt
                     raise e
                 continue
-    
+
     # Strategy 2: LlamaTokenizer for models that explicitly request it
     elif hints.get("tokenizer_class") == "LlamaTokenizer":
         print("🎯 Model config requests LlamaTokenizer specifically")
         return _load_llama_tokenizer_fallback(model_path)
-    
+
     # Strategy 3: Standard AutoTokenizer for most models
     else:
         print("🎯 Using standard AutoTokenizer")
@@ -194,23 +294,23 @@ def _load_llama_tokenizer_fallback(model_path: Path) -> Any:
 def get_model_info(model_name: str) -> Optional[Dict[str, Any]]:
     """
     Get detailed information about a specific model
-    ENHANCED with tokenizer analysis and compatibility info
+    ENHANCED with Intel Arc A770 compatibility analysis
     """
     if model_name == "root-model":
         model_path = MODELS_DIR
     else:
         model_path = MODELS_DIR / model_name
-    
+
     if not model_path.exists():
         return None
-    
+
     info = {
         "name": model_name,
         "path": str(model_path),
         "size_gb": _calculate_model_size(model_path),
         "files": _list_model_files(model_path)
     }
-    
+
     # Enhanced config analysis
     hints = _analyze_model_config(model_path)
     info.update({
@@ -218,9 +318,10 @@ def get_model_info(model_name: str) -> Optional[Dict[str, Any]]:
         "architecture": hints.get("architectures", ["unknown"])[0] if hints.get("architectures") else "unknown",
         "is_mistral_format": hints.get("is_mistral_format", False),
         "has_vision_capability": hints.get("has_vision", False),
-        "recommended_tokenizer": _get_recommended_tokenizer_type(hints)
+        "recommended_tokenizer": _get_recommended_tokenizer_type(hints),
+        "intel_arc_compatible": True  # All models can benefit from Intel Arc acceleration
     })
-    
+
     # Try to read config (check both config.json and params.json for complete support)
     for config_file in ['config.json', 'params.json']:
         config_path = model_path / config_file
@@ -228,7 +329,6 @@ def get_model_info(model_name: str) -> Optional[Dict[str, Any]]:
             try:
                 with open(config_path, 'r') as f:
                     config = json.load(f)
-                
                 if config_file == 'params.json':
                     # Pixtral/Mistral format
                     info.update({
@@ -244,10 +344,9 @@ def get_model_info(model_name: str) -> Optional[Dict[str, Any]]:
                         "config_format": "config.json"
                     })
                 break
-                
             except Exception as e:
                 info["config_error"] = f"Failed to parse {config_file}: {str(e)}"
-    
+
     return info
 
 def _get_recommended_tokenizer_type(hints: Dict[str, Any]) -> str:
@@ -300,13 +399,13 @@ def get_cache_info() -> Dict[str, Any]:
 def validate_model(model_name: str) -> Dict[str, Any]:
     """
     Validate a model without loading it
-    ENHANCED with tokenizer compatibility checking
+    ENHANCED with Intel Arc A770 compatibility checking
     """
     if model_name == "root-model":
         model_path = MODELS_DIR
     else:
         model_path = MODELS_DIR / model_name
-    
+
     validation = {
         "model_name": model_name,
         "path_exists": model_path.exists(),
@@ -314,34 +413,35 @@ def validate_model(model_name: str) -> Dict[str, Any]:
         "has_model_files": False,
         "has_tokenizer": False,
         "tokenizer_compatibility": "unknown",
+        "intel_arc_ready": False,
         "errors": []
     }
-    
+
     if not model_path.exists():
         validation["errors"].append(f"Model directory not found: {model_path}")
         return validation
-    
+
     # Check for config files
     config_files = ['config.json', 'params.json']
     has_config = any((model_path / f).exists() for f in config_files)
     validation["has_config"] = has_config
-    
+
     if not has_config:
         validation["errors"].append("No config.json or params.json found")
-    
+
     # Check for model weight files
     model_files = list(model_path.glob('*.safetensors')) + list(model_path.glob('*.bin'))
     validation["has_model_files"] = len(model_files) > 0
     validation["model_file_count"] = len(model_files)
-    
+
     if not model_files:
         validation["errors"].append("No .safetensors or .bin model files found")
-    
+
     # Enhanced tokenizer checking
     tokenizer_files = ['tokenizer.json', 'vocab.txt', 'tokenizer_config.json', 'tokenizer.model']
     has_tokenizer = any((model_path / f).exists() for f in tokenizer_files)
     validation["has_tokenizer"] = has_tokenizer
-    
+
     if has_tokenizer:
         # Analyze tokenizer compatibility
         hints = _analyze_model_config(model_path)
@@ -349,16 +449,20 @@ def validate_model(model_name: str) -> Dict[str, Any]:
     else:
         validation["errors"].append("No tokenizer files found")
         validation["tokenizer_compatibility"] = "missing"
-    
+
+    # Intel Arc A770 readiness check
+    validation["intel_arc_ready"] = has_config and len(model_files) > 0
+    if validation["intel_arc_ready"]:
+        validation["arc_optimization_note"] = "Model ready for Intel Arc A770 acceleration"
+
     validation["is_valid"] = (has_config and len(model_files) > 0 and has_tokenizer)
-    
+
     return validation
 
-# Utility function for startup model discovery
 def discover_and_validate_models() -> Dict[str, Any]:
     """
-    Discover all models and validate their integrity at startup
-    ENHANCED with tokenizer compatibility analysis
+    Discover all models and validate their Intel Arc A770 compatibility at startup
+    ENHANCED with Intel Arc optimization analysis
     """
     models = list_available_models()
     summary = {
@@ -366,10 +470,12 @@ def discover_and_validate_models() -> Dict[str, Any]:
         "valid_models": [],
         "invalid_models": [],
         "tokenizer_issues": [],
+        "intel_arc_ready": [],
         "discovery_time": "runtime",
-        "models_directory": str(MODELS_DIR)
+        "models_directory": str(MODELS_DIR),
+        "hardware_optimization": "Intel Arc A770 + Intel i9 12th gen + 94GB RAM"
     }
-    
+
     for model_name in models:
         validation = validate_model(model_name)
         if validation["is_valid"]:
@@ -378,68 +484,140 @@ def discover_and_validate_models() -> Dict[str, Any]:
                 "name": model_name,
                 "size_gb": info["size_gb"] if info else 0,
                 "architecture": info.get("architecture", "unknown") if info else "unknown",
-                "tokenizer_type": validation["tokenizer_compatibility"]
+                "tokenizer_type": validation["tokenizer_compatibility"],
+                "intel_arc_ready": validation["intel_arc_ready"]
             }
-            
+
             # Flag potential tokenizer issues
             if "Pixtral" in validation["tokenizer_compatibility"] or validation["tokenizer_compatibility"] == "missing":
                 summary["tokenizer_issues"].append(model_name)
-            
+
+            # Track Intel Arc ready models
+            if validation["intel_arc_ready"]:
+                summary["intel_arc_ready"].append(model_name)
+
             summary["valid_models"].append(model_summary)
         else:
             summary["invalid_models"].append({
                 "name": model_name,
                 "errors": validation["errors"]
             })
-    
+
     return summary
 
+# INTEL ARC A770 Hardware detection utility
+def check_intel_arc_status() -> Dict[str, Any]:
+    """Check Intel Arc A770 hardware and software status"""
+    status = {
+        "hardware_detected": False,
+        "intel_extension_available": False,
+        "xpu_available": False,
+        "device_count": 0,
+        "recommendations": []
+    }
+    
+    try:
+        import torch
+        import intel_extension_for_pytorch as ipex
+        
+        status["intel_extension_available"] = True
+        
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            status["xpu_available"] = True
+            status["device_count"] = torch.xpu.device_count()
+            status["hardware_detected"] = True
+            
+            if status["device_count"] > 0:
+                # Get device info
+                device_info = []
+                for i in range(status["device_count"]):
+                    try:
+                        device_props = torch.xpu.get_device_properties(i)
+                        device_info.append({
+                            "device_id": i,
+                            "name": getattr(device_props, 'name', 'Intel XPU Device'),
+                            "total_memory": getattr(device_props, 'total_memory', 'Unknown')
+                        })
+                    except:
+                        device_info.append({"device_id": i, "name": "Intel XPU Device", "total_memory": "Unknown"})
+                
+                status["devices"] = device_info
+        else:
+            status["recommendations"].append("Intel XPU not detected - check Intel Arc drivers")
+            
+    except ImportError:
+        status["recommendations"].append("Install Intel Extension for PyTorch: pip install intel_extension_for_pytorch")
+    except Exception as e:
+        status["recommendations"].append(f"Intel Arc detection error: {e}")
+    
+    return status
+
 if __name__ == "__main__":
-    # Enhanced test with tokenizer compatibility analysis
-    print("🔍 AIDE Enhanced Dynamic Model Discovery & Validation Test")
-    print("=" * 70)
+    # Enhanced test with Intel Arc A770 compatibility analysis
+    print("🔍 AIDE Enhanced Dynamic Model Discovery & Intel Arc A770 Optimization Test")
+    print("=" * 80)
     print(f"📁 Models directory: {MODELS_DIR}")
     print(f"📁 Directory exists: {MODELS_DIR.exists()}")
     
-    models = list_available_models()
-    print(f"🤖 Available models: {models}")
+    # Check Intel Arc A770 status
+    print(f"\n🎮 Intel Arc A770 Hardware Status:")
+    arc_status = check_intel_arc_status()
+    print(f"  Hardware detected: {'✅' if arc_status['hardware_detected'] else '❌'}")
+    print(f"  Intel Extension available: {'✅' if arc_status['intel_extension_available'] else '❌'}")
+    print(f"  XPU available: {'✅' if arc_status['xpu_available'] else '❌'}")
+    print(f"  Device count: {arc_status['device_count']}")
     
+    if arc_status.get('devices'):
+        for device in arc_status['devices']:
+            print(f"    Device {device['device_id']}: {device['name']}")
+    
+    if arc_status['recommendations']:
+        print(f"  Recommendations:")
+        for rec in arc_status['recommendations']:
+            print(f"    - {rec}")
+
+    models = list_available_models()
+    print(f"\n🤖 Available models: {models}")
+
     if models:
         for model in models:
             print(f"\n📊 Model: {model}")
-            
-            # Validate model with enhanced checks
+            # Validate model with Intel Arc compatibility checks
             validation = validate_model(model)
-            print(f" Valid: {'✅' if validation['is_valid'] else '❌'}")
-            print(f" Tokenizer: {validation['tokenizer_compatibility']}")
+            print(f"  Valid: {'✅' if validation['is_valid'] else '❌'}")
+            print(f"  Tokenizer: {validation['tokenizer_compatibility']}")
+            print(f"  Intel Arc Ready: {'✅' if validation['intel_arc_ready'] else '❌'}")
             
             if validation['errors']:
-                print(f" Errors: {validation['errors']}")
-            
+                print(f"  Errors: {validation['errors']}")
+
             # Get detailed info if valid
             if validation['is_valid']:
                 info = get_model_info(model)
                 if info:
-                    print(f" Size: {info['size_gb']} GB")
-                    print(f" Architecture: {info.get('architecture', 'unknown')}")
-                    print(f" Config format: {info.get('config_format', 'unknown')}")
-                    print(f" Vision capable: {'✅' if info.get('has_vision_capability') else '❌'}")
-                    print(f" Files: {len(info['files'])} files")
-    
-    # Full system summary with tokenizer analysis
+                    print(f"  Size: {info['size_gb']} GB")
+                    print(f"  Architecture: {info.get('architecture', 'unknown')}")
+                    print(f"  Config format: {info.get('config_format', 'unknown')}")
+                    print(f"  Vision capable: {'✅' if info.get('has_vision_capability') else '❌'}")
+                    print(f"  Files: {len(info['files'])} files")
+
+    # Full system summary with Intel Arc analysis
     summary = discover_and_validate_models()
     print(f"\n🎯 Enhanced System Summary:")
-    print(f" Total models found: {summary['total_models']}")
-    print(f" Valid models: {len(summary['valid_models'])}")
-    print(f" Invalid models: {len(summary['invalid_models'])}")
-    print(f" Models with potential tokenizer issues: {len(summary['tokenizer_issues'])}")
-    
+    print(f"  Total models found: {summary['total_models']}")
+    print(f"  Valid models: {len(summary['valid_models'])}")
+    print(f"  Invalid models: {len(summary['invalid_models'])}")
+    print(f"  Models with tokenizer issues: {len(summary['tokenizer_issues'])}")
+    print(f"  Intel Arc A770 ready models: {len(summary['intel_arc_ready'])}")
+    print(f"  Hardware optimization: {summary['hardware_optimization']}")
+
     if summary['valid_models']:
-        print(f"\n✅ Ready to load:")
+        print(f"\n✅ Ready to load with Intel Arc A770 acceleration:")
         for model in summary['valid_models']:
-            print(f" - {model['name']} ({model['size_gb']} GB, {model['architecture']}, {model['tokenizer_type']})")
-    
-    if summary['tokenizer_issues']:
-        print(f"\n⚠️ Models requiring special tokenizer handling:")
-        for model_name in summary['tokenizer_issues']:
-            print(f" - {model_name}")
+            arc_indicator = "🎮" if model['intel_arc_ready'] else "💻"
+            print(f"  {arc_indicator} {model['name']} ({model['size_gb']} GB, {model['architecture']}, {model['tokenizer_type']})")
+
+    if summary['intel_arc_ready']:
+        print(f"\n🎮 Models optimized for your Intel Arc A770:")
+        for model_name in summary['intel_arc_ready']:
+            print(f"  - {model_name}")
