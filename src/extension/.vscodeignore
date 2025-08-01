@@ -1,0 +1,18 @@
+# src/extension/.vscodeignore
+
+# Exclude raw TypeScript and configs
+/src/**/*.ts
+/src/**/*.tsx
+webpack.config.js
+tsconfig.json
+
+# IDE configs, backups
+.vscode/
+*.bak
+
+# Tests, scripts, and extras not needed at runtime
+scripts/
+
+# DON'T exclude license files - keep these lines out:
+# *.md  <- REMOVED this line that was blocking LICENSE.md
+# *.yml <- REMOVED this line too

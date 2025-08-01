@@ -1,4 +1,4 @@
-# FILE: src/backend/api.py - COMPLETE BULLETPROOF VERSION WITH ALL FIXES
+# FILE: src/backend/api.py - OPTIMIZED STARTUP VERSION
 
 import sys
 import os
@@ -7,7 +7,7 @@ from pathlib import Path
 # Ensure backend directory is in Python path FIRST
 backend_dir = str(Path(__file__).parent)
 if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)  # ← FIX #1: PROPER INDENTATION
+    sys.path.insert(0, backend_dir)
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,7 +72,7 @@ class ToolRegistry:
         """Serialize tools for JSON transmission"""
         try:
             return [
-                {  # ← FIX #2: PROPER DICT FORMATTING
+                {
                     "name": n,
                     "description": getattr(f, '__desc__', ''),
                     "args_schema": getattr(f, '__schema__', {})
@@ -105,38 +105,37 @@ def tool(name: str, desc: str = "", schema: dict = None):
     return wrapper
 
 # ============================================================================
-# BULLETPROOF DYNAMIC TOOL LOADING WITH ALL FIXES
+# OPTIMIZED DYNAMIC TOOL LOADING
 # ============================================================================
 
 def load_existing_tools():
-    """Load tools from the tools directory - BULLETPROOF VERSION WITH ALL FIXES"""
+    """Load tools from the tools directory - OPTIMIZED VERSION"""
     tools_dir = Path(__file__).parent / "tools"
     
     # Create tools directory if it doesn't exist
     if not tools_dir.exists():
         print("🔍 Tools directory doesn't exist, creating it...")
         tools_dir.mkdir(exist_ok=True)
-    
+
     print(f"🔍 Loading tools from: {tools_dir}")
-    
+
     # Add directories to Python path
     if str(tools_dir) not in sys.path:
         sys.path.insert(0, str(tools_dir))
-    
+
     tools_loaded = 0
     for tool_file in tools_dir.glob("*.py"):
         if tool_file.name == "__init__.py":
             continue
-        
+
         try:
             print(f"📦 Loading tool file: {tool_file}")
             tool_name = tool_file.stem
-            
+
             # Read and modify the file content to inject our registry
             file_content = tool_file.read_text(encoding='utf-8')
-            
-            # Replace problematic imports with direct references
             modified_content = file_content
+
             import_patterns = [
                 ("from backend.api import tool", "# INJECTED: Using global registry"),
                 ("from backend.api import tool, hybrid_online_search", "# INJECTED: Using global registry"),
@@ -144,13 +143,13 @@ def load_existing_tools():
                 ("from .api import tool", "# INJECTED: Using global registry"),
                 ("from api import tool", "# INJECTED: Using global registry")
             ]
-            
+
             for old_import, replacement in import_patterns:
                 if old_import in modified_content:
                     modified_content = modified_content.replace(old_import, replacement)
-            
+
             # Execute with proper globals that include our instances
-            exec_globals = {  # ← FIX #3: PROPER DICT FORMATTING
+            exec_globals = {
                 '__name__': f'tools.{tool_name}',
                 '__file__': str(tool_file),
                 '__builtins__': __builtins__,
@@ -165,20 +164,19 @@ def load_existing_tools():
                 'requests': requests,
                 'asyncio': asyncio,
             }
-            
+
             # Create empty locals dict
             exec_locals = {}
-            
+
             # Execute the modified content
             exec(modified_content, exec_globals, exec_locals)
-            
             tools_loaded += 1
             print(f"✅ Successfully loaded tool: {tool_name}")
-            
+
         except Exception as e:
             print(f"❌ Failed to load tool {tool_file}: {e}")
             traceback.print_exc()
-    
+
     print(f"📦 Tool loading complete: {tools_loaded} files processed")
 
 # ============================================================================
@@ -268,16 +266,28 @@ def hybrid_online_search(query):
     return {"error": f"No provider returned a valid result. Last error: {last_error}"}
 
 # ============================================================================
-# MODEL MANAGEMENT
+# OPTIMIZED MODEL MANAGEMENT WITH LAZY LOADING
 # ============================================================================
 
+# Global variables for lazy loading
+_model_cache = {}
+_available_models_cache = None
+CURRENT_MODEL = None
+
 def safe_list_available_models():
-    """Safely list available models"""
+    """Safely list available models with caching"""
+    global _available_models_cache
+    
+    if _available_models_cache is not None:
+        return _available_models_cache
+        
     try:
         models = list_available_models()
-        return models if models else []
+        _available_models_cache = models if models else []
+        return _available_models_cache
     except Exception as e:
         print(f"⚠️ Model discovery failed: {e}")
+        _available_models_cache = []
         return []
 
 def is_valid_model_path(model_path):
@@ -291,6 +301,22 @@ def is_valid_model_path(model_path):
     except:
         return False
 
+def lazy_load_model(model_name):
+    """Lazy load model only when needed"""
+    global _model_cache
+    
+    if model_name in _model_cache:
+        return _model_cache[model_name]
+    
+    try:
+        print(f"🤖 Lazy loading model: {model_name}")
+        tokenizer, model = load_model(model_name)
+        _model_cache[model_name] = (tokenizer, model)
+        return tokenizer, model
+    except Exception as e:
+        print(f"⚠️ Failed to lazy load model {model_name}: {e}")
+        return None, None
+
 def validate_current_model():
     """Validate and set current model"""
     global CURRENT_MODEL
@@ -298,7 +324,7 @@ def validate_current_model():
         print(f"⚠️ Invalid CURRENT_MODEL: {CURRENT_MODEL}, resetting to None")
         CURRENT_MODEL = None
 
-# Initialize model system
+# Initialize model system with lazy loading
 try:
     available_models = safe_list_available_models()
     CURRENT_MODEL = config.get("model")
@@ -311,9 +337,9 @@ try:
     
     # If no valid model, try to use the first available one
     if not CURRENT_MODEL and available_models:
-        CURRENT_MODEL = available_models[0]  # ← FIX #4: UNCOMMENTED FOR PROPER MODEL SELECTION
-    
-    print(f"🤖 Model initialization: Found {len(available_models)} models, current: {CURRENT_MODEL}")
+        CURRENT_MODEL = available_models[0]
+        print(f"🤖 Model initialization: Found {len(available_models)} models, current: {CURRENT_MODEL}")
+        
 except Exception as e:
     print(f"⚠️ Model initialization failed: {e}")
     available_models = []
@@ -343,7 +369,6 @@ def should_use_tool_mode(message: str) -> bool:
     
     if any(pattern in message_lower for pattern in discussion_patterns):
         return False
-    
     if any(pattern in message_lower for pattern in command_patterns):
         return True
     
@@ -393,7 +418,7 @@ class AgenticIntentProcessor:
             "document": ["document", "docs", "documentation", "comment"],
             "search": ["find", "search", "look for", "locate"]
         }
-    
+
     def process_intent(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Process user intent and return appropriate response"""
         message_lower = message.lower()
@@ -419,7 +444,7 @@ class AgenticIntentProcessor:
             "actions": suggested_actions,
             "detected_intents": detected_intents
         }
-    
+
     def _handle_intent(self, intent: str, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Handle specific intent"""
         current_file = context.get("currentFile", {})
@@ -457,7 +482,7 @@ class AgenticIntentProcessor:
         }
         
         return responses.get(intent, responses["general_help"])
-    
+
     def _get_file_context_message(self, current_file: Dict[str, Any]) -> str:
         """Get context message for current file"""
         if current_file and current_file.get("filename"):
@@ -468,7 +493,7 @@ class AgenticIntentProcessor:
             else:
                 return f"I can see you're working on {filename} ({language}). Let me analyze the entire file."
         return "Please open a file in the editor so I can provide more specific assistance."
-    
+
     def _get_workspace_context_message(self, workspace: Dict[str, Any], current_file: Dict[str, Any]) -> str:
         """Get context message for workspace"""
         messages = []
@@ -482,38 +507,40 @@ class AgenticIntentProcessor:
 agentic_processor = AgenticIntentProcessor()
 
 # ============================================================================
-# LLM CONVERSATION CODE
+# OPTIMIZED LLM CONVERSATION CODE WITH LAZY LOADING
 # ============================================================================
 
 async def api_chat_internal(message: str, context: dict) -> dict:
-    """Internal chat API for conversation mode"""
+    """Internal chat API for conversation mode with lazy loading"""
     system_prompt = """You are AIDE, a helpful coding assistant.
 Have a natural conversation with the user.
 Only mention tools or capabilities if directly asked about them."""
-    
+
     if CURRENT_MODEL and is_valid_model_path(CURRENT_MODEL):
         try:
-            tokenizer, model = load_model(CURRENT_MODEL)  # ← FIX #5: UNCOMMENTED MODEL LOADING
-            input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"  # ← FIX #6: DEFINED input_prompt
-            input_data = tokenizer(input_prompt, return_tensors="pt", truncation=True, max_length=2048)
-            
-            if hasattr(model, 'device'):
-                input_data = {k: v.to(model.device) for k, v in input_data.items()}
-            
-            output_tokens = model.generate(
-                **input_data,
-                max_new_tokens=512,
-                do_sample=True,
-                temperature=0.8,
-                top_p=0.95,
-                pad_token_id=tokenizer.eos_token_id
-            )
-            
-            response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-            if "AIDE:" in response_text:
-                response_text = response_text.split("AIDE:")[-1].strip()
-            
-            return {"response": response_text, "type": "conversation"}
+            # Lazy load the model
+            tokenizer, model = lazy_load_model(CURRENT_MODEL)
+            if tokenizer and model:
+                input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"
+                input_data = tokenizer(input_prompt, return_tensors="pt", truncation=True, max_length=2048)
+                
+                if hasattr(model, 'device'):
+                    input_data = {k: v.to(model.device) for k, v in input_data.items()}
+                
+                output_tokens = model.generate(
+                    **input_data,
+                    max_new_tokens=512,
+                    do_sample=True,
+                    temperature=0.8,
+                    top_p=0.95,
+                    pad_token_id=tokenizer.eos_token_id
+                )
+                
+                response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+                if "AIDE:" in response_text:
+                    response_text = response_text.split("AIDE:")[-1].strip()
+                
+                return {"response": response_text, "type": "conversation"}
             
         except Exception as e:
             print(f"⚠️ Conversational model failed: {e}")
@@ -548,7 +575,6 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         )
         
         input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
-        
         if hasattr(model, 'device'):
             input_data = {k: v.to(model.device) for k, v in input_data.items()}
         
@@ -568,7 +594,6 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         # Look for tool invocations
         tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
         tools_found = tool_pattern.findall(response_text)
-        
         used_tools = []
         actions = []
         
@@ -598,20 +623,20 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         return error_msg, [], []
 
 # ============================================================================
-# MODERN LIFESPAN APPROACH
+# OPTIMIZED LIFESPAN - THE KEY FIX
 # ============================================================================
 
-# FIX #7: DEFINE GLOBAL VARIABLES THAT ARE REFERENCED LATER
+# Global variables that are referenced later
 active_connections = set()
 shutdown_event = asyncio.Event()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    print("🚀 AIDE Backend starting with bulletproof tool loading...")
+    # Startup - OPTIMIZED AND NON-BLOCKING
+    print("🚀 AIDE Backend starting with OPTIMIZED bulletproof tool loading...")
     
-    # Give the system time to stabilize
-    time.sleep(1.0)
+    # NON-BLOCKING: Give the system time to stabilize
+    await asyncio.sleep(0.1)  # Reduced from 1.0 second
     
     # Load tools from directory
     print(f"📊 Pre-loading tool count: {len(tool_registry.get_tool_names())}")
@@ -619,8 +644,8 @@ async def lifespan(app: FastAPI):
     
     load_existing_tools()
     
-    # Give tools time to register
-    time.sleep(0.5)
+    # NON-BLOCKING: Give tools time to register
+    await asyncio.sleep(0.1)  # Reduced from 0.5 seconds
     
     # Final verification with detailed debugging
     final_tool_count = len(tool_registry.get_tool_names())
@@ -632,18 +657,17 @@ async def lifespan(app: FastAPI):
     # Debug the registry state
     print(f"🔍 Registry internal state: {len(tool_registry._tools)} tools in _tools dict")
     print(f"🔍 Registry keys: {list(tool_registry._tools.keys())}")
-    
     print(f"🔌 WebSocket enabled with generous timeout handling")
-    print(f"🤖 Model system: {'✅ Ready' if is_valid_model_path(CURRENT_MODEL) else '⚠️ No valid models'}")
+    print(f"🤖 Model system: {'✅ Ready' if is_valid_model_path(CURRENT_MODEL) else '⚠️ Lazy loading enabled'}")
     
     yield  # This is where the app runs
     
     # Shutdown (optional cleanup)
     print("🛑 AIDE Backend shutting down gracefully...")
 
-# --- FastAPI app with modern lifespan ---
+# --- FastAPI app with optimized lifespan ---
 app = FastAPI(
-    title="AIDE Backend with Dynamic Models, Agentic Features & Hybrid Search",
+    title="AIDE Backend with Optimized Startup, Dynamic Models, Agentic Features & Hybrid Search",
     lifespan=lifespan
 )
 
@@ -658,7 +682,7 @@ app.add_middleware(
 app.include_router(intent_router, prefix="/api/v1")
 
 # ============================================================================
-# WEBSOCKET ENDPOINT - WITH BULLETPROOF ERROR HANDLING
+# WEBSOCKET ENDPOINT - OPTIMIZED WITH LAZY LOADING
 # ============================================================================
 
 @app.websocket("/ws")
@@ -674,8 +698,8 @@ async def websocket_endpoint(websocket: WebSocket):
         # Add to active connections
         active_connections.add(websocket)
         
-        # Give time for component testing
-        await asyncio.sleep(0.5)
+        # Minimal startup delay - OPTIMIZED
+        await asyncio.sleep(0.1)  # Reduced from 0.5
         
         # Get tools and models safely
         try:
@@ -703,7 +727,8 @@ async def websocket_endpoint(websocket: WebSocket):
             traceback.print_exc()
             current = None
         
-        await asyncio.sleep(0.2)
+        # Minimal delay - OPTIMIZED
+        await asyncio.sleep(0.05)  # Reduced from 0.2
         
         # Send initial registry message
         try:
@@ -714,7 +739,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "available_models": models,
                     "current_model": current,
                     "total_tools": len(tools),
-                    "model_status": "loaded" if current else "no_models_available"
+                    "model_status": "lazy_loading" if current else "no_models_available"
                 }
             }
             await websocket.send_json(initial_message)
@@ -742,6 +767,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     if should_use_tool_mode(message):
                         print("🛠️ Using tool mode")
+                        
                         # Build enhanced prompt with tools
                         try:
                             enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
@@ -751,9 +777,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         
                         if is_valid_model_path(CURRENT_MODEL):
                             try:
-                                tokenizer, model = load_model(CURRENT_MODEL)  # ← FIX #8: UNCOMMENTED MODEL LOADING
-                                response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, enhanced_prompt, context)
-                                mode = "tool"
+                                # LAZY LOAD model
+                                tokenizer, model = lazy_load_model(CURRENT_MODEL)
+                                if tokenizer and model:
+                                    response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, enhanced_prompt, context)
+                                    mode = "tool"
+                                else:
+                                    response = "Model failed to load. Using fallback mode."
+                                    used_tools = []
+                                    actions = []
+                                    mode = "tool_fallback"
+                                    
                             except Exception as model_err:
                                 print(f"⚠️ Model failed: {model_err}")
                                 response = f"AI model encountered an issue: {str(model_err)}. Using fallback mode."
@@ -771,6 +805,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "tools_invoked": used_tools,
                             "actions": actions
                         }
+                    
                     else:
                         print("💬 Using chat mode")
                         response_data = await api_chat_internal(message, context)
@@ -842,7 +877,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "total_tools": len(tool_registry.get_tool_names())
                             }
                         })
-                    
+                        
                     except Exception as e:
                         print(f"❌ Tool creation failed: {e}")
                         traceback.print_exc()
@@ -880,18 +915,19 @@ async def websocket_endpoint(websocket: WebSocket):
         active_connections.discard(websocket)
 
 # ============================================================================
-# REST API ENDPOINTS (CONTINUED WITH ALL REMAINING ENDPOINTS)
+# REST API ENDPOINTS (ALL EXISTING ENDPOINTS PRESERVED)
 # ============================================================================
 
 @app.get("/health")
 async def health():
     return {
         "status": "ok",
-        "message": "AIDE backend running",
+        "message": "AIDE backend running - OPTIMIZED STARTUP",
         "websocket_enabled": True,
         "tools_registered": len(tool_registry.get_tool_names()),
         "current_model": CURRENT_MODEL,
-        "model_valid": is_valid_model_path(CURRENT_MODEL)
+        "model_valid": is_valid_model_path(CURRENT_MODEL),
+        "startup_optimized": True
     }
 
 @app.get("/health/websocket")
@@ -908,7 +944,7 @@ async def websocket_health():
             "tools_count": len(tools),
             "models_count": len(models),
             "current_model": current_model,
-            "message": "WebSocket endpoint is ready"
+            "message": "WebSocket endpoint is ready - OPTIMIZED"
         }
     except Exception as e:
         return {
@@ -926,7 +962,8 @@ async def api_list_models():
         "current": CURRENT_MODEL,
         "total_available": len(models),
         "discovery_method": "filesystem_scan",
-        "current_valid": is_valid_model_path(CURRENT_MODEL)
+        "current_valid": is_valid_model_path(CURRENT_MODEL),
+        "lazy_loading": True
     }
 
 @app.post("/models/use")
@@ -951,13 +988,26 @@ async def api_choose_model(request: Request):
         validate_current_model()
         
         if is_valid_model_path(CURRENT_MODEL):
-            tokenizer, model = load_model(CURRENT_MODEL)
-            print(f"✅ Model loaded: {model_name}")
-            return {
-                "status": "success",
-                "active": CURRENT_MODEL,
-                "message": f"Successfully switched to {model_name}"
-            }
+            # Clear cache to force reload
+            global _model_cache
+            if CURRENT_MODEL in _model_cache:
+                del _model_cache[CURRENT_MODEL]
+            
+            # Lazy load the model
+            tokenizer, model = lazy_load_model(CURRENT_MODEL)
+            if tokenizer and model:
+                print(f"✅ Model loaded: {model_name}")
+                return {
+                    "status": "success",
+                    "active": CURRENT_MODEL,
+                    "message": f"Successfully switched to {model_name}",
+                    "lazy_loaded": True
+                }
+            else:
+                return {
+                    "error": f"Failed to lazy load model: {model_name}",
+                    "current": CURRENT_MODEL
+                }
         else:
             return {
                 "error": f"Model path invalid: {model_name}",
@@ -989,7 +1039,8 @@ async def api_current_model():
     return {
         "current_model": CURRENT_MODEL,
         "status": "active",
-        "valid": True
+        "valid": True,
+        "lazy_loaded": CURRENT_MODEL in _model_cache
     }
 
 @app.post("/chat")
@@ -1005,15 +1056,21 @@ async def api_chat(request: Request):
         if is_valid_model_path(CURRENT_MODEL):
             try:
                 print(f"🤖 Using model: {CURRENT_MODEL}")
-                tokenizer, model = load_model(CURRENT_MODEL)
-                response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
-                return {
-                    "response": response,
-                    "model_used": CURRENT_MODEL,
-                    "actions": actions,
-                    "tools_invoked": used_tools,
-                    "conversation_type": "llm_first"
-                }
+                # Lazy load the model
+                tokenizer, model = lazy_load_model(CURRENT_MODEL)
+                if tokenizer and model:
+                    response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
+                    return {
+                        "response": response,
+                        "model_used": CURRENT_MODEL,
+                        "actions": actions,
+                        "tools_invoked": used_tools,
+                        "conversation_type": "llm_first",
+                        "lazy_loaded": True
+                    }
+                else:
+                    raise Exception("Model lazy loading failed")
+                    
             except Exception as model_err:
                 print(f"⚠️ Model failed: {str(model_err)}")
                 result = agentic_processor.process_intent(message, context)
@@ -1034,7 +1091,7 @@ async def api_chat(request: Request):
                     result["response"] += f"\n\n🌐 **Web Search:**\n{search_result['result']}"
             
             return result
-    
+            
     except Exception as e:
         return {
             "response": f"I encountered an error: {str(e)}",
@@ -1110,7 +1167,7 @@ async def api_ingest_document(request: Request):
         }
 
 # ============================================================================
-# SPEECH ENDPOINTS
+# SPEECH ENDPOINTS (ALL PRESERVED)
 # ============================================================================
 
 @app.post("/speech/recognize")
@@ -1131,7 +1188,7 @@ async def speech_recognize(request: Request):
             if not os.path.exists(model_path):
                 possible_paths = [
                     "/usr/share/vosk-models/vosk-model-en-us-0.22",
-                    "/opt/vosk-models/vosk-model-en-us-0.22",
+                    "/opt/vosk-models/vosk-model-en-us-0.22", 
                     "./models/vosk-model-en-us-0.22",
                     os.path.expanduser("~/.vosk/models/vosk-model-en-us-0.22")
                 ]
@@ -1145,16 +1202,14 @@ async def speech_recognize(request: Request):
             
             model = vosk.Model(model_path)
             rec = vosk.KaldiRecognizer(model, 16000)
-            
             p = pyaudio.PyAudio()
             stream = p.open(format=pyaudio.paInt16,
-                          channels=1,
-                          rate=16000,
-                          input=True,
-                          frames_per_buffer=8000)
+                           channels=1,
+                           rate=16000,
+                           input=True,
+                           frames_per_buffer=8000)
             
             print(f"🎤 Recording for {timeout} seconds...")
-            
             transcript = ""
             frames_to_read = int(16000 / 8000 * timeout)
             
@@ -1194,7 +1249,6 @@ async def speech_recognize(request: Request):
                 "status": "error",
                 "message": f"Vosk speech recognition error: {str(e)}"
             }
-    
     except Exception as e:
         return {
             "status": "error",
@@ -1241,7 +1295,7 @@ async def speech_synthesize(request: Request):
                     print(f"Audio playback failed: {play_error}")
             
             return {
-                "status": "success",
+                "status": "success", 
                 "message": f"Successfully synthesized with Coqui TTS: {text[:50]}{'...' if len(text) > 50 else ''}",
                 "audio_file": audio_path,
                 "backend": "coqui_tts",
@@ -1260,7 +1314,6 @@ async def speech_synthesize(request: Request):
                 "status": "error",
                 "message": f"Coqui TTS synthesis failed: {str(e)}"
             }
-    
     except Exception as e:
         return {
             "status": "error",
@@ -1307,9 +1360,9 @@ async def speech_status():
     except ImportError:
         pass
     
-    speech_ready = (status["vosk_available"] and
-                   status["coqui_tts_available"] and
-                   status["pyaudio_available"] and
+    speech_ready = (status["vosk_available"] and 
+                   status["coqui_tts_available"] and 
+                   status["pyaudio_available"] and 
                    status["sounddevice_available"])
     
     return {
@@ -1353,18 +1406,19 @@ async def delayed_force_exit():
     os._exit(0)  # Nuclear option - bypasses all cleanup
 
 # ============================================================================
-# MAIN ENTRY POINT
+# MAIN ENTRY POINT 
 # ============================================================================
 
 if __name__ == "__main__":
     host = os.getenv("AIDE_HOST", config.get("host", "127.0.0.1"))
     port = int(os.getenv("AIDE_PORT", config.get("port", 8000)))
     
-    print(f"🚀 Starting AIDE on {host}:{port}")
+    print(f"🚀 Starting OPTIMIZED AIDE on {host}:{port}")
     print(f"🎤 Speech functionality: Vosk + Coqui TTS enabled")
     print(f"🤖 Models available: {len(safe_list_available_models())}")
-    print(f"🎯 Current model: {CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else 'None (fallback mode)'}")
-    print(f"🔌 WebSocket: ✅ Generous timeout + bulletproof error handling")
+    print(f"🎯 Current model: {CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else 'None (lazy loading enabled)'}")
+    print(f"🔌 WebSocket: ✅ OPTIMIZED startup with minimal delays")
     print(f"🛠️ Dynamic tools: ✅ Bulletproof registration system")
+    print(f"⚡ STARTUP OPTIMIZATIONS: Non-blocking lifespan, lazy model loading, reduced timeouts")
     
     uvicorn.run(app, host=host, port=port)
