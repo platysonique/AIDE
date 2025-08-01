@@ -85,7 +85,7 @@ export class EnhancedBackendManager {
             this.setupOptimizedProcessMonitoring();
 
             // OPTIMIZED: Progressive timeout strategy (60s instead of 120s)
-            const serverStarted = await this.waitForServerReadyOptimized(60000);
+            const serverStarted = await this.waitForServerReadyOptimized(300000);
 
             if (serverStarted) {
                 this.startOptimizedHealthMonitoring(context);

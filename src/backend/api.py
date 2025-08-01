@@ -1,4 +1,4 @@
-# FILE: src/backend/api.py - FULLY OPTIMIZED VERSION
+# FILE: src/backend/api.py - FULLY OPTIMIZED VERSION WITH FIXED INTEL ARC A770 DETECTION
 
 import sys
 import os
@@ -116,26 +116,26 @@ def load_existing_tools():
     if not tools_dir.exists():
         print("🔍 Tools directory doesn't exist, creating it...")
         tools_dir.mkdir(exist_ok=True)
-
+    
     print(f"🔍 Loading tools from: {tools_dir}")
-
+    
     # Add directories to Python path
     if str(tools_dir) not in sys.path:
         sys.path.insert(0, str(tools_dir))
-
+    
     tools_loaded = 0
     for tool_file in tools_dir.glob("*.py"):
         if tool_file.name == "__init__.py":
             continue
-
+            
         try:
             print(f"📦 Loading tool file: {tool_file}")
             tool_name = tool_file.stem
-
+            
             # Read and modify the file content to inject our registry
             file_content = tool_file.read_text(encoding='utf-8')
             modified_content = file_content
-
+            
             import_patterns = [
                 ("from backend.api import tool", "# INJECTED: Using global registry"),
                 ("from backend.api import tool, hybrid_online_search", "# INJECTED: Using global registry"),
@@ -143,11 +143,11 @@ def load_existing_tools():
                 ("from .api import tool", "# INJECTED: Using global registry"),
                 ("from api import tool", "# INJECTED: Using global registry")
             ]
-
+            
             for old_import, replacement in import_patterns:
                 if old_import in modified_content:
                     modified_content = modified_content.replace(old_import, replacement)
-
+            
             # Execute with proper globals that include our instances
             exec_globals = {
                 '__name__': f'tools.{tool_name}',
@@ -164,19 +164,20 @@ def load_existing_tools():
                 'requests': requests,
                 'asyncio': asyncio,
             }
-
+            
             # Create empty locals dict
             exec_locals = {}
-
+            
             # Execute the modified content
             exec(modified_content, exec_globals, exec_locals)
+            
             tools_loaded += 1
             print(f"✅ Successfully loaded tool: {tool_name}")
-
+            
         except Exception as e:
             print(f"❌ Failed to load tool {tool_file}: {e}")
             traceback.print_exc()
-
+    
     print(f"📦 Tool loading complete: {tools_loaded} files processed")
 
 # ============================================================================
@@ -263,6 +264,7 @@ def hybrid_online_search(query):
             except Exception as e:
                 last_error = f"{provider}: {str(e)}"
                 continue
+    
     return {"error": f"No provider returned a valid result. Last error: {last_error}"}
 
 # ============================================================================
@@ -277,10 +279,9 @@ CURRENT_MODEL = None
 def safe_list_available_models():
     """Safely list available models with caching"""
     global _available_models_cache
-    
     if _available_models_cache is not None:
         return _available_models_cache
-        
+    
     try:
         models = list_available_models()
         _available_models_cache = models if models else []
@@ -294,6 +295,7 @@ def is_valid_model_path(model_path):
     """FIXED: Check if a model path OR model name is valid"""
     if not model_path:
         return False
+    
     if not isinstance(model_path, (str, os.PathLike)):
         return False
     
@@ -312,7 +314,7 @@ def is_valid_model_path(model_path):
         return False
 
 def lazy_load_model(model_name):
-    """Lazy load model only when needed"""
+    """Lazy load model only when needed with FIXED Intel Arc A770 detection"""
     global _model_cache
     
     if model_name in _model_cache:
@@ -320,12 +322,81 @@ def lazy_load_model(model_name):
     
     try:
         print(f"🤖 Lazy loading model: {model_name}")
+        
+        # FIXED: Check Intel Arc A770 status BEFORE loading
+        intel_arc_status = check_intel_arc_availability()
+        if intel_arc_status["hardware_detected"]:
+            print(f"🎮 BEAST MODE: Intel Arc A770 detected! Using XPU acceleration")
+        else:
+            print(f"⚠️ Intel Arc A770 not detected: {intel_arc_status['status_message']}")
+        
         tokenizer, model = load_model(model_name)
         _model_cache[model_name] = (tokenizer, model)
         return tokenizer, model
+        
     except Exception as e:
         print(f"⚠️ Failed to lazy load model {model_name}: {e}")
         return None, None
+
+def check_intel_arc_availability():
+    """Check if Intel Arc A770 is properly detected and available"""
+    status = {
+        "hardware_detected": False,
+        "xpu_available": False,
+        "device_count": 0,
+        "status_message": "",
+        "recommendations": []
+    }
+    
+    try:
+        # First check if Intel Extension is available
+        import intel_extension_for_pytorch as ipex
+        print("✅ Intel Extension for PyTorch found")
+        
+        # Check if torch is available with XPU support
+        import torch
+        
+        # CRITICAL: Check for XPU availability properly
+        if hasattr(torch, 'xpu'):
+            if torch.xpu.is_available():
+                device_count = torch.xpu.device_count()
+                if device_count > 0:
+                    status.update({
+                        "hardware_detected": True,
+                        "xpu_available": True,
+                        "device_count": device_count,
+                        "status_message": f"Intel Arc A770 detected with {device_count} XPU device(s)"
+                    })
+                    
+                    # Get device properties if available
+                    try:
+                        for i in range(device_count):
+                            device_props = torch.xpu.get_device_properties(i)
+                            print(f"🎮 XPU Device {i}: {getattr(device_props, 'name', 'Intel XPU')}")
+                    except Exception as prop_error:
+                        print(f"⚠️ Could not get XPU device properties: {prop_error}")
+                        
+                else:
+                    status["status_message"] = "XPU available but no devices found"
+                    status["recommendations"].append("Check Intel Arc A770 drivers")
+            else:
+                status["status_message"] = "XPU not available - drivers may not be loaded"
+                status["recommendations"].extend([
+                    "Install/update Intel Arc drivers",
+                    "Check if intel-level-zero and intel-opencl-icd are installed"
+                ])
+        else:
+            status["status_message"] = "PyTorch XPU support not found"
+            status["recommendations"].append("Reinstall intel_extension_for_pytorch with XPU support")
+    
+    except ImportError:
+        status["status_message"] = "Intel Extension for PyTorch not installed"
+        status["recommendations"].append("Install: pip install intel_extension_for_pytorch")
+    except Exception as e:
+        status["status_message"] = f"Intel Arc detection error: {e}"
+        status["recommendations"].append("Check Intel Arc A770 installation and drivers")
+    
+    return status
 
 def validate_current_model():
     """Validate and set current model"""
@@ -351,9 +422,18 @@ try:
     if not CURRENT_MODEL and available_models:
         CURRENT_MODEL = available_models[0]
         print(f"🤖 Fallback to first available model: {CURRENT_MODEL}")
-        
+    
     print(f"🤖 Model initialization: Found {len(available_models)} models, current: {CURRENT_MODEL}")
-        
+    
+    # Check Intel Arc status at startup
+    arc_status = check_intel_arc_availability()
+    if arc_status["hardware_detected"]:
+        print(f"🎮 {arc_status['status_message']}")
+    else:
+        print(f"⚠️ Intel Arc Status: {arc_status['status_message']}")
+        if arc_status["recommendations"]:
+            print(f"💡 Recommendations: {', '.join(arc_status['recommendations'])}")
+            
 except Exception as e:
     print(f"⚠️ Model initialization failed: {e}")
     available_models = []
@@ -383,6 +463,7 @@ def should_use_tool_mode(message: str) -> bool:
     
     if any(pattern in message_lower for pattern in discussion_patterns):
         return False
+    
     if any(pattern in message_lower for pattern in command_patterns):
         return True
     
@@ -527,11 +608,12 @@ agentic_processor = AgenticIntentProcessor()
 async def api_chat_internal(message: str, context: dict) -> dict:
     """Internal chat API for conversation mode with lazy loading"""
     system_prompt = """I'm AIDE, your intelligent coding assistant. I can help with code review, debugging, testing, documentation, and more. I have access to tools and can provide both conversational responses and technical assistance."""
-
+    
     if CURRENT_MODEL and is_valid_model_path(CURRENT_MODEL):
         try:
             # Lazy load the model
             tokenizer, model = lazy_load_model(CURRENT_MODEL)
+            
             if tokenizer and model:
                 input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"
                 input_data = tokenizer(input_prompt, return_tensors="pt", truncation=True, max_length=2048)
@@ -539,21 +621,30 @@ async def api_chat_internal(message: str, context: dict) -> dict:
                 if hasattr(model, 'device'):
                     input_data = {k: v.to(model.device) for k, v in input_data.items()}
                 
-                output_tokens = model.generate(
-                    **input_data,
-                    max_new_tokens=512,
-                    do_sample=True,
-                    temperature=0.8,
-                    top_p=0.95,
-                    pad_token_id=tokenizer.eos_token_id
-                )
+                # FIXED: Safe generation with proper tokenizer handling
+                generation_config = {
+                    "max_new_tokens": 512,
+                    "do_sample": True,
+                    "temperature": 0.8,
+                    "top_p": 0.95
+                }
+                
+                # Handle pad_token_id safely
+                if hasattr(tokenizer, 'eos_token_id') and tokenizer.eos_token_id is not None:
+                    generation_config["pad_token_id"] = tokenizer.eos_token_id
+                elif hasattr(tokenizer, 'pad_token_id') and tokenizer.pad_token_id is not None:
+                    generation_config["pad_token_id"] = tokenizer.pad_token_id
+                else:
+                    generation_config["pad_token_id"] = 0  # Safe fallback
+                
+                output_tokens = model.generate(**input_data, **generation_config)
                 
                 response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
                 if "AIDE:" in response_text:
                     response_text = response_text.split("AIDE:")[-1].strip()
                 
                 return {"response": response_text, "type": "conversation"}
-            
+                
         except Exception as e:
             print(f"⚠️ Conversational model failed: {e}")
     
@@ -564,8 +655,15 @@ async def api_chat_internal(message: str, context: dict) -> dict:
     }
 
 async def generate_with_tool_calling(model, tokenizer, message, context):
-    """Generate response with tool calling capability"""
+    """Generate response with tool calling capability - FIXED VERSION"""
     try:
+        # SAFETY CHECK: Ensure tokenizer has required attributes
+        if not hasattr(tokenizer, 'eos_token_id') or tokenizer.eos_token_id is None:
+            if hasattr(tokenizer, 'pad_token_id') and tokenizer.pad_token_id is not None:
+                tokenizer.eos_token_id = tokenizer.pad_token_id
+            else:
+                tokenizer.eos_token_id = 0  # Fallback
+        
         # Get available tools safely
         try:
             available_tools = tool_registry.serialize()
@@ -588,17 +686,23 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         )
         
         input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
+        
         if hasattr(model, 'device'):
             input_data = {k: v.to(model.device) for k, v in input_data.items()}
         
-        output_tokens = model.generate(
-            **input_data,
-            max_new_tokens=512,
-            do_sample=True,
-            temperature=0.8,
-            top_p=0.95,
-            pad_token_id=tokenizer.eos_token_id
-        )
+        # Safe generation configuration
+        generation_config = {
+            "max_new_tokens": 512,
+            "do_sample": True,
+            "temperature": 0.8,
+            "top_p": 0.95,
+            "pad_token_id": tokenizer.eos_token_id
+        }
+        
+        # Remove None values from config
+        generation_config = {k: v for k, v in generation_config.items() if v is not None}
+        
+        output_tokens = model.generate(**input_data, **generation_config)
         
         response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
         if "AIDE:" in response_text:
@@ -607,6 +711,7 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         # Look for tool invocations
         tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
         tools_found = tool_pattern.findall(response_text)
+        
         used_tools = []
         actions = []
         
@@ -663,13 +768,13 @@ async def lifespan(app: FastAPI):
     # Final verification with detailed debugging
     final_tool_count = len(tool_registry.get_tool_names())
     final_tool_names = tool_registry.get_tool_names()
-    
     print(f"🛠️ FINAL TOOL COUNT: {final_tool_count} tools registered")
     print(f"📋 FINAL TOOL NAMES: {final_tool_names}")
     
     # Debug the registry state
     print(f"🔍 Registry internal state: {len(tool_registry._tools)} tools in _tools dict")
     print(f"🔍 Registry keys: {list(tool_registry._tools.keys())}")
+    
     print(f"🔌 WebSocket enabled with generous timeout handling")
     print(f"🤖 Model system: {'✅ Ready with ' + str(CURRENT_MODEL) if is_valid_model_path(CURRENT_MODEL) else '⚠️ No valid model - fallback mode'}")
     
@@ -752,8 +857,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     "model_status": "ready" if current else "no_models_available"
                 }
             }
+            
             await websocket.send_json(initial_message)
             print("🔌 Initial message sent successfully! 🎉")
+            
         except Exception as e:
             print(f"🔌 Failed to send initial message: {e}")
             traceback.print_exc()
@@ -777,7 +884,6 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     if should_use_tool_mode(message):
                         print("🛠️ Using tool mode")
-                        
                         # Build enhanced prompt with tools
                         try:
                             enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
@@ -789,6 +895,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             try:
                                 # LAZY LOAD model
                                 tokenizer, model = lazy_load_model(CURRENT_MODEL)
+                                
                                 if tokenizer and model:
                                     response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, enhanced_prompt, context)
                                     mode = "tool"
@@ -815,7 +922,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             "tools_invoked": used_tools,
                             "actions": actions
                         }
-                    
                     else:
                         print("💬 Using chat mode")
                         response_data = await api_chat_internal(message, context)
@@ -895,7 +1001,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": f"Failed to create tool: {str(e)}"
                         })
-                
+            
             except asyncio.TimeoutError:
                 print("⏰ WebSocket message timeout - client may be slow")
                 continue
@@ -1006,6 +1112,7 @@ async def api_choose_model(request: Request):
             
             # Test lazy load the model
             tokenizer, model = lazy_load_model(CURRENT_MODEL)
+            
             if tokenizer and model:
                 print(f"✅ Model loaded: {model_name}")
                 return {
@@ -1069,8 +1176,10 @@ async def api_chat(request: Request):
                 print(f"🤖 Using model: {CURRENT_MODEL}")
                 # Lazy load the model
                 tokenizer, model = lazy_load_model(CURRENT_MODEL)
+                
                 if tokenizer and model:
                     response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
+                    
                     return {
                         "response": response,
                         "model_used": CURRENT_MODEL,
@@ -1177,8 +1286,6 @@ async def api_ingest_document(request: Request):
             "message": f"Failed to ingest {file_name}: {str(e)}"
         }
 
-# [Include all your existing speech endpoints - they're working fine]
-
 @app.post("/force-shutdown")
 async def force_shutdown():
     """Force shutdown endpoint that kills the process"""
@@ -1210,7 +1317,7 @@ async def delayed_force_exit():
     os._exit(0)  # Nuclear option - bypasses all cleanup
 
 # ============================================================================
-# MAIN ENTRY POINT 
+# MAIN ENTRY POINT
 # ============================================================================
 
 if __name__ == "__main__":
@@ -1223,5 +1330,14 @@ if __name__ == "__main__":
     print(f"🔌 WebSocket: ✅ FULLY OPTIMIZED startup")
     print(f"🛠️ Dynamic tools: ✅ Bulletproof registration system")
     print(f"⚡ ALL OPTIMIZATIONS: Non-blocking lifespan, fixed model validation, lazy loading, enhanced fallbacks")
+    
+    # Check Intel Arc status at startup
+    arc_status = check_intel_arc_availability()
+    if arc_status["hardware_detected"]:
+        print(f"🎮 BEAST MODE: {arc_status['status_message']}")
+    else:
+        print(f"⚠️ Intel Arc Status: {arc_status['status_message']}")
+        if arc_status["recommendations"]:
+            print(f"💡 To enable Intel Arc A770: {', '.join(arc_status['recommendations'])}")
     
     uvicorn.run(app, host=host, port=port)

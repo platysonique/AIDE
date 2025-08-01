@@ -43,7 +43,7 @@ def list_available_models() -> List[str]:
 
 def _detect_optimal_device() -> Dict[str, Any]:
     """
-    INTEL ARC A770 DETECTION AND OPTIMIZATION
+    INTEL ARC A770 DETECTION AND OPTIMIZATION - FIXED VERSION
     Your beast hardware deserves beast performance!
     """
     import torch
@@ -57,11 +57,9 @@ def _detect_optimal_device() -> Dict[str, Any]:
             return {
                 "device_map": "xpu:0",
                 "device_name": "Intel Arc A770 (XPU:0) - BEAST MODE ACTIVATED",
-                "torch_dtype": torch.float16,  # FP16 for GPU efficiency
                 "use_intel_xpu": True,
                 "memory_strategy": "GPU-accelerated with 94GB RAM backup",
                 "model_kwargs": {
-                    "torch_dtype": torch.float16,
                     "low_cpu_mem_usage": True,
                     "trust_remote_code": True
                 }
@@ -77,11 +75,10 @@ def _detect_optimal_device() -> Dict[str, Any]:
         return {
             "device_map": "auto",
             "device_name": "CUDA GPU",
-            "torch_dtype": torch.float16,
             "use_intel_xpu": False,
             "memory_strategy": "CUDA-optimized",
             "model_kwargs": {
-                "torch_dtype": torch.float16,
+                "torch_dtype": torch.float16,  # Safe to set for CUDA
                 "trust_remote_code": True
             }
         }
@@ -91,11 +88,10 @@ def _detect_optimal_device() -> Dict[str, Any]:
     return {
         "device_map": "cpu",
         "device_name": "CPU (94GB RAM BEAST MODE)",
-        "torch_dtype": torch.float32,
         "use_intel_xpu": False,
         "memory_strategy": "High-RAM CPU optimized for your 94GB setup",
         "model_kwargs": {
-            "torch_dtype": torch.float32,
+            "torch_dtype": torch.float32,  # Safe for CPU
             "low_cpu_mem_usage": True,
             "trust_remote_code": True
         }
@@ -155,6 +151,8 @@ def load_model(model_name: str) -> Tuple[Any, Any]:
     device_config = _detect_optimal_device()
     
     try:
+        # FIXED: Import torch and transformers at function level
+        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         # 🧠 SMART TOKENIZER DETECTION - Let each model tell us what it needs!
@@ -167,12 +165,21 @@ def load_model(model_name: str) -> Tuple[Any, Any]:
         print(f"🎮 Using device strategy: {device_config['device_name']}")
         print(f"📊 Memory strategy: {device_config['memory_strategy']}")
         
-        model = AutoModelForCausalLM.from_pretrained(
-            str(model_path),
-            device_map=device_config["device_map"],
-            torch_dtype=device_config["torch_dtype"],
+        # Build model loading arguments intelligently - FIXED VERSION
+        model_args = {
+            "device_map": device_config["device_map"],
             **device_config["model_kwargs"]
-        )
+        }
+        
+        # Only set torch_dtype if Intel extension isn't handling it
+        if not device_config.get("use_intel_xpu", False):
+            # For CUDA and CPU paths, we can safely set torch_dtype
+            if torch.cuda.is_available():
+                model_args["torch_dtype"] = torch.float16
+            else:
+                model_args["torch_dtype"] = torch.float32
+
+        model = AutoModelForCausalLM.from_pretrained(str(model_path), **model_args)
 
         # Apply Intel Arc A770 optimizations if available
         if device_config["use_intel_xpu"]:
