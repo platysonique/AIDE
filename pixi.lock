@@ -423,6 +423,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/a4/e3/22748996c573c6a7d5326ef0292956afac089c73f14e3dfee0a94661e631/gruut_lang_en-2.0.1.tar.gz
       - pypi: https://files.pythonhosted.org/packages/44/ff/c45aa055988d327c3e1240451c0c35bfefe8f0ea6f92e4fd6192785f246d/gruut_lang_es-2.0.1.tar.gz
       - pypi: https://files.pythonhosted.org/packages/79/c0/57aaaff7db6db61d1fac5d2fc0955ba03bea812c8de002233a2a8752d64f/gruut_lang_fr-2.0.2.tar.gz
+      - pypi: https://files.pythonhosted.org/packages/d6/d8/f87ea6f42456254b48915970ed98e993110521e9263472840174d32c880d/hf_transfer-0.1.9-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/a8/6c/d2fbdaaa5959339d53ba38e94c123e4e84b8fbc4b84beb0e70d7c1608486/httplib2-0.22.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/8a/eb/427ed2b20a38a4ee29f24dbe4ae2dafab198674fe9a85e3d6adf9e5f5f41/inflect-7.5.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5e/ba/04cf1c89cef2ac88dfdf4609badccf49de6a69abebdb92ec88e227eaa61d/intel_extension_for_pytorch-2.7.0-cp311-cp311-manylinux_2_28_x86_64.whl
@@ -2090,6 +2091,11 @@ packages:
   purls: []
   size: 1806911
   timestamp: 1753795594101
+- pypi: https://files.pythonhosted.org/packages/d6/d8/f87ea6f42456254b48915970ed98e993110521e9263472840174d32c880d/hf_transfer-0.1.9-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+  name: hf-transfer
+  version: 0.1.9
+  sha256: cdca9bfb89e6f8f281890cc61a8aff2d3cecaff7e1a4d275574d96ca70098557
+  requires_python: '>=3.7'
 - conda: https://conda.anaconda.org/conda-forge/linux-64/hf-xet-1.1.5-py39h260a9e5_3.conda
   noarch: python
   sha256: b28905ff975bd935cd113ee97b7eb5b5e3b0969a21302135c6ae096aa06a61f6

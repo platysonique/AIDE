@@ -1,115 +1,68 @@
 [project]
-
 name = "aide-codium-extension"
-
 version = "0.1.0"
-
 channels = ["conda-forge", "https://software.repos.intel.com/python/conda"]
-
 platforms = ["linux-64"]
 
 [dependencies]
-
 python = "3.11.*"
-
 ffmpeg = "*"
-
 qdrant-client = "*"
-
 pypdf2 = "*"
-
 python-docx = "*"
-
 tesseract = "*"
-
 pytesseract = "*"
-
 pdf2image = "*"
-
 ebooklib = "*"
-
 markdown = "*"
-
 requests = "*"
-
 tokenizers = "*"
-
 numpy = "*"
-
 scipy = "*"
-
 pysoundfile = "*"
-
 librosa = "*"
-
 pyaudio = "*"
-
 fastapi = "*"
-
 uvicorn = ">=0.35.0,<0.36"
-
 websockets = "*"
-
 pydantic = "*"
-
 watchdog = "*"
-
 gitpython = "*"
-
 tqdm = "*"
-
 click = "*"
-
 rich = "*"
-
 webrtcvad = "*"
-
 llama-cpp-python = "*"
-
 ctransformers = "*"
-
 bitsandbytes = "*"
-
 chromadb = "*"
-
 dpcpp_cpp_rt = "*"
-
 "ruamel.yaml" = "*"
 
 [pypi-dependencies]
-
 openai-whisper = "*"
-
 vosk = "*"
-
 coqui-tts = "*"
-
 google-api-python-client = "*"
-
 serpapi = "*"
-
 duckduckgo-search = "*"
-
 sentence-transformers = "*"
-
 loguru = "*"
-
 torch = "*"
-
 torchvision = "*"
-
 torchaudio = "*"
-
 intel-extension-for-pytorch = ">=2.7.0, <3"
-
 oneccl-bind-pt = { version="*", index="https://pytorch-extension.intel.com/release-whl/stable/xpu/us/" }
-
 transformers = "*"
-
 accelerate = "*"
-
 pillow = "*"
-
 mistral-common = "*"
-
 sounddevice = ">=0.5.2, <0.6"
+huggingface-hub = "*"
+hf-transfer = "*"
+
+[tasks]
+setup-models = "mkdir -p models"
+download-deepseek = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download huihui-ai/DeepSeek-R1-Distill-Qwen-7B-abliterated --local-dir ./models/deepseek"
+download-pixtral = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download mistralai/Pixtral-12B-2409 --local-dir ./models/pixtral"
+download-both = "pixi run download-deepseek && pixi run download-pixtral"

@@ -4,7 +4,7 @@ port: 8000
 db_path: ./vectors.db
 offline_index_path: ./index/
 gpu_device: xpu
-model: ./models/
+model: null
 
 # ======== Online Search Providers ========
 # Set which provider to try first (by default: perplexity)
