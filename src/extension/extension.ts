@@ -16,7 +16,7 @@ export async function activate(context: vscode.ExtensionContext) {
     
     try {
         // OPTIMIZED: Extended loading message timeout to match backend manager's 60s timeout + buffer
-        const loadingMessage = vscode.window.setStatusBarMessage('$(loading~spin) Starting AIDE backend server...', 120000);
+        const loadingMessage = vscode.window.setStatusBarMessage('$(loading~spin) Starting AIDE backend server...', 300000);
         
         // Start backend server first and wait for it to be ready
         console.log('🔧 Initializing enhanced backend manager...');
@@ -339,3 +339,4 @@ export function deactivate() {
     backendManager.cleanup();
     console.log('✅ AIDE deactivation complete');
 }
+          
