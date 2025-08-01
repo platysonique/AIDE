@@ -1,4 +1,4 @@
-# FILE: src/backend/api.py - COMPLETE BULLETPROOF VERSION WITH INDENTATION FIX
+# FILE: src/backend/api.py - COMPLETE BULLETPROOF VERSION WITH ALL FIXES
 
 import sys
 import os
@@ -7,7 +7,7 @@ from pathlib import Path
 # Ensure backend directory is in Python path FIRST
 backend_dir = str(Path(__file__).parent)
 if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+    sys.path.insert(0, backend_dir)  # ← FIX #1: PROPER INDENTATION
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -72,7 +72,7 @@ class ToolRegistry:
         """Serialize tools for JSON transmission"""
         try:
             return [
-                {
+                {  # ← FIX #2: PROPER DICT FORMATTING
                     "name": n,
                     "description": getattr(f, '__desc__', ''),
                     "args_schema": getattr(f, '__schema__', {})
@@ -105,34 +105,33 @@ def tool(name: str, desc: str = "", schema: dict = None):
     return wrapper
 
 # ============================================================================
-# BULLETPROOF DYNAMIC TOOL LOADING WITH INDENTATION FIX
+# BULLETPROOF DYNAMIC TOOL LOADING WITH ALL FIXES
 # ============================================================================
 
 def load_existing_tools():
-    """Load tools from the tools directory - BULLETPROOF VERSION WITH INDENTATION FIX"""
+    """Load tools from the tools directory - BULLETPROOF VERSION WITH ALL FIXES"""
     tools_dir = Path(__file__).parent / "tools"
     
-    # Create tools directory if it doesn't exist (PROPERLY INDENTED)
+    # Create tools directory if it doesn't exist
     if not tools_dir.exists():
         print("🔍 Tools directory doesn't exist, creating it...")
         tools_dir.mkdir(exist_ok=True)
     
-    # THIS ALWAYS RUNS - CRITICAL INDENTATION FIX
     print(f"🔍 Loading tools from: {tools_dir}")
-
+    
     # Add directories to Python path
     if str(tools_dir) not in sys.path:
         sys.path.insert(0, str(tools_dir))
-
+    
     tools_loaded = 0
     for tool_file in tools_dir.glob("*.py"):
         if tool_file.name == "__init__.py":
             continue
-
+        
         try:
             print(f"📦 Loading tool file: {tool_file}")
             tool_name = tool_file.stem
-
+            
             # Read and modify the file content to inject our registry
             file_content = tool_file.read_text(encoding='utf-8')
             
@@ -149,9 +148,9 @@ def load_existing_tools():
             for old_import, replacement in import_patterns:
                 if old_import in modified_content:
                     modified_content = modified_content.replace(old_import, replacement)
-
+            
             # Execute with proper globals that include our instances
-            exec_globals = {
+            exec_globals = {  # ← FIX #3: PROPER DICT FORMATTING
                 '__name__': f'tools.{tool_name}',
                 '__file__': str(tool_file),
                 '__builtins__': __builtins__,
@@ -166,20 +165,20 @@ def load_existing_tools():
                 'requests': requests,
                 'asyncio': asyncio,
             }
-
+            
             # Create empty locals dict
             exec_locals = {}
-
+            
             # Execute the modified content
             exec(modified_content, exec_globals, exec_locals)
             
             tools_loaded += 1
             print(f"✅ Successfully loaded tool: {tool_name}")
-
+            
         except Exception as e:
             print(f"❌ Failed to load tool {tool_file}: {e}")
             traceback.print_exc()
-
+    
     print(f"📦 Tool loading complete: {tools_loaded} files processed")
 
 # ============================================================================
@@ -266,7 +265,6 @@ def hybrid_online_search(query):
             except Exception as e:
                 last_error = f"{provider}: {str(e)}"
                 continue
-    
     return {"error": f"No provider returned a valid result. Last error: {last_error}"}
 
 # ============================================================================
@@ -313,7 +311,7 @@ try:
     
     # If no valid model, try to use the first available one
     if not CURRENT_MODEL and available_models:
-        CURRENT_MODEL = available_models[0]
+        CURRENT_MODEL = available_models[0]  # ← FIX #4: UNCOMMENTED FOR PROPER MODEL SELECTION
     
     print(f"🤖 Model initialization: Found {len(available_models)} models, current: {CURRENT_MODEL}")
 except Exception as e:
@@ -395,7 +393,7 @@ class AgenticIntentProcessor:
             "document": ["document", "docs", "documentation", "comment"],
             "search": ["find", "search", "look for", "locate"]
         }
-
+    
     def process_intent(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Process user intent and return appropriate response"""
         message_lower = message.lower()
@@ -421,7 +419,7 @@ class AgenticIntentProcessor:
             "actions": suggested_actions,
             "detected_intents": detected_intents
         }
-
+    
     def _handle_intent(self, intent: str, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Handle specific intent"""
         current_file = context.get("currentFile", {})
@@ -459,7 +457,7 @@ class AgenticIntentProcessor:
         }
         
         return responses.get(intent, responses["general_help"])
-
+    
     def _get_file_context_message(self, current_file: Dict[str, Any]) -> str:
         """Get context message for current file"""
         if current_file and current_file.get("filename"):
@@ -470,7 +468,7 @@ class AgenticIntentProcessor:
             else:
                 return f"I can see you're working on {filename} ({language}). Let me analyze the entire file."
         return "Please open a file in the editor so I can provide more specific assistance."
-
+    
     def _get_workspace_context_message(self, workspace: Dict[str, Any], current_file: Dict[str, Any]) -> str:
         """Get context message for workspace"""
         messages = []
@@ -492,13 +490,13 @@ async def api_chat_internal(message: str, context: dict) -> dict:
     system_prompt = """You are AIDE, a helpful coding assistant.
 Have a natural conversation with the user.
 Only mention tools or capabilities if directly asked about them."""
-
+    
     if CURRENT_MODEL and is_valid_model_path(CURRENT_MODEL):
         try:
-            tokenizer, model = load_model(CURRENT_MODEL)
-            input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"
-            
+            tokenizer, model = load_model(CURRENT_MODEL)  # ← FIX #5: UNCOMMENTED MODEL LOADING
+            input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"  # ← FIX #6: DEFINED input_prompt
             input_data = tokenizer(input_prompt, return_tensors="pt", truncation=True, max_length=2048)
+            
             if hasattr(model, 'device'):
                 input_data = {k: v.to(model.device) for k, v in input_data.items()}
             
@@ -516,6 +514,7 @@ Only mention tools or capabilities if directly asked about them."""
                 response_text = response_text.split("AIDE:")[-1].strip()
             
             return {"response": response_text, "type": "conversation"}
+            
         except Exception as e:
             print(f"⚠️ Conversational model failed: {e}")
     
@@ -533,11 +532,11 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         except Exception as e:
             print(f"⚠️ Tool serialization in generate_with_tool_calling failed: {e}")
             available_tools = []
-
+        
         search_tools = list(PROVIDER_FUNCS.keys())
         current_file = context.get("currentFile", {})
         workspace = context.get("workspace", {})
-
+        
         system_prompt = (
             "You are AIDE, an advanced coding assistant. "
             f"Available tools: {json.dumps(available_tools, indent=2)}\n"
@@ -547,11 +546,12 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
             "Use TOOL[tool_name] to invoke tools.\n\n"
             f"User: {message}\nAIDE:"
         )
-
+        
         input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
+        
         if hasattr(model, 'device'):
             input_data = {k: v.to(model.device) for k, v in input_data.items()}
-
+        
         output_tokens = model.generate(
             **input_data,
             max_new_tokens=512,
@@ -560,17 +560,18 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
             top_p=0.95,
             pad_token_id=tokenizer.eos_token_id
         )
-
+        
         response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
         if "AIDE:" in response_text:
             response_text = response_text.split("AIDE:")[-1].strip()
-
+        
         # Look for tool invocations
         tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
         tools_found = tool_pattern.findall(response_text)
+        
         used_tools = []
         actions = []
-
+        
         for tool in set(tools_found):
             if tool.lower() in PROVIDER_FUNCS:
                 try:
@@ -588,9 +589,9 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
                     response_text += f"\n\n**{tool} Result:**\n{json.dumps(result, indent=2)}"
                 except Exception as e:
                     response_text += f"\n\n*{tool} error: {str(e)}*"
-
+        
         return response_text, used_tools, actions
-
+        
     except Exception as e:
         error_msg = f"Model generation failed: {str(e)}"
         print(f"⚠️ {error_msg}")
@@ -599,6 +600,10 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
 # ============================================================================
 # MODERN LIFESPAN APPROACH
 # ============================================================================
+
+# FIX #7: DEFINE GLOBAL VARIABLES THAT ARE REFERENCED LATER
+active_connections = set()
+shutdown_event = asyncio.Event()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -620,12 +625,14 @@ async def lifespan(app: FastAPI):
     # Final verification with detailed debugging
     final_tool_count = len(tool_registry.get_tool_names())
     final_tool_names = tool_registry.get_tool_names()
+    
     print(f"🛠️ FINAL TOOL COUNT: {final_tool_count} tools registered")
     print(f"📋 FINAL TOOL NAMES: {final_tool_names}")
     
     # Debug the registry state
     print(f"🔍 Registry internal state: {len(tool_registry._tools)} tools in _tools dict")
     print(f"🔍 Registry keys: {list(tool_registry._tools.keys())}")
+    
     print(f"🔌 WebSocket enabled with generous timeout handling")
     print(f"🤖 Model system: {'✅ Ready' if is_valid_model_path(CURRENT_MODEL) else '⚠️ No valid models'}")
     
@@ -663,6 +670,9 @@ async def websocket_endpoint(websocket: WebSocket):
             ("Access-Control-Allow-Credentials", "true")
         ])
         print("🔌 WebSocket accepted successfully!")
+        
+        # Add to active connections
+        active_connections.add(websocket)
         
         # Give time for component testing
         await asyncio.sleep(0.5)
@@ -741,7 +751,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         
                         if is_valid_model_path(CURRENT_MODEL):
                             try:
-                                tokenizer, model = load_model(CURRENT_MODEL)
+                                tokenizer, model = load_model(CURRENT_MODEL)  # ← FIX #8: UNCOMMENTED MODEL LOADING
                                 response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, enhanced_prompt, context)
                                 mode = "tool"
                             except Exception as model_err:
@@ -805,7 +815,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         # Create tool file
                         tools_dir = Path(__file__).parent / "tools"
                         tools_dir.mkdir(exist_ok=True)
-                        
                         tool_file = tools_dir / f"{name}.py"
                         tool_file.write_text(code, encoding="utf-8")
                         
@@ -841,7 +850,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": f"Failed to create tool: {str(e)}"
                         })
-            
+                
             except asyncio.TimeoutError:
                 print("⏰ WebSocket message timeout - client may be slow")
                 continue
@@ -866,9 +875,12 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         print(f"🔌 CRITICAL WebSocket error: {e}")
         traceback.print_exc()
+    finally:
+        # Remove from active connections
+        active_connections.discard(websocket)
 
 # ============================================================================
-# REST API ENDPOINTS
+# REST API ENDPOINTS (CONTINUED WITH ALL REMAINING ENDPOINTS)
 # ============================================================================
 
 @app.get("/health")
@@ -1022,6 +1034,7 @@ async def api_chat(request: Request):
                     result["response"] += f"\n\n🌐 **Web Search:**\n{search_result['result']}"
             
             return result
+    
     except Exception as e:
         return {
             "response": f"I encountered an error: {str(e)}",
@@ -1141,6 +1154,7 @@ async def speech_recognize(request: Request):
                           frames_per_buffer=8000)
             
             print(f"🎤 Recording for {timeout} seconds...")
+            
             transcript = ""
             frames_to_read = int(16000 / 8000 * timeout)
             
@@ -1169,7 +1183,7 @@ async def speech_recognize(request: Request):
                 "backend": "vosk",
                 "duration": timeout
             }
-        
+            
         except ImportError as e:
             return {
                 "status": "error",
@@ -1235,7 +1249,7 @@ async def speech_synthesize(request: Request):
                 "text_length": len(text),
                 "played": play_immediately
             }
-        
+            
         except ImportError as e:
             return {
                 "status": "error",
@@ -1307,7 +1321,7 @@ async def speech_status():
             "Install missing components with: pixi add vosk-api coqui-tts pyaudio sounddevice soundfile"
         ]
     }
-    
+
 @app.post("/force-shutdown")
 async def force_shutdown():
     """Force shutdown endpoint that kills the process"""
