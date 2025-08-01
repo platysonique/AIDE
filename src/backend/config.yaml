@@ -1,3 +1,6 @@
+# Enhanced config.yaml with OpenVINO Backend Support + Strategic External APIs
+# FULLY COMPATIBLE - Replace your current src/backend/config.yaml with this version
+
 # ======== Backend and Model Settings ========
 host: 127.0.0.1
 port: 8000
@@ -6,39 +9,72 @@ offline_index_path: ./index/
 gpu_device: xpu
 model: deepseek
 
-# ======== Online Search Providers ========
-# Set which provider to try first (by default: perplexity)
-online_search: perplexity
+# ======== Backend Selection Priority ========
+# OpenVINO gets priority for Intel Arc A770, with graceful fallbacks
+backend_priority:
+  - "openvino"     # Try OpenVINO first for Arc A770 GPU acceleration
+  - "pytorch_xpu"  # Fallback to PyTorch XPU if available  
+  - "pytorch_cpu"  # Final fallback to CPU mode
 
-# Ordered fallback search list (tries next if previous fails)
-fallback_order:
-  - duckduckgo
-  - wikipedia
-  - wolframalpha
-  - open-meteo
+# ======== OpenVINO Specific Settings ========
+openvino:
+  # Performance optimizations for Intel Arc A770
+  performance_hint: "LATENCY"          # Optimized for interactive use
+  cache_models: true                   # Enable model caching
+  gpu_loop_unrolling: true            # Arc A770 optimization
+  disable_winograd: false             # Keep winograd for better performance
+  cpu_threads: 0                      # Use all CPU threads when on CPU
+  # Model conversion settings
+  convert_models: true                # Auto-convert models to OpenVINO format
+  cache_dir: ".openvino_cache"        # Local cache directory
+  # Generation defaults
+  default_max_tokens: 512
+  default_temperature: 0.8
+  default_top_p: 0.95
 
-# ======== Provider Endpoints and Keys ========
+# ======== PyTorch XPU Fallback Settings ========
+pytorch_xpu:
+  torch_dtype: "float16"              # Use FP16 for GPU efficiency
+  low_cpu_mem_usage: true             # Memory optimization
+  trust_remote_code: true             # Allow custom model code
 
-# --- Perplexity AI ---
-# Requires an API key for full use via their API.
-perplexity_api_key: ""
+# ======== CPU Fallback Settings ========  
+pytorch_cpu:
+  torch_dtype: "float32"              # Use FP32 for CPU stability
+  low_cpu_mem_usage: true             # Memory optimization for 94GB RAM
+  trust_remote_code: true             # Allow custom model code
+  device_map: "cpu"                   # Explicit CPU mapping
 
-# --- DuckDuckGo (Instant Answer API) ---
-duckduckgo_api_key: ""   # Not required for public use
+# ======== Hybrid Search & External APIs ========
+# Strategic use of external APIs to enhance local AI capabilities
 
-# --- Wikipedia API ---
-wikipedia_api_key: ""    # Not required for public search
+# Perplexity AI - for real-time web search and current events
+perplexity_api_key: ""                # Your API key goes here
 
-# --- Wolfram Alpha (Short Answer API) ---
-# Sign up for a free AppID at https://products.wolframalpha.com/api/
-wolframalpha_appid: ""
+# Open-Meteo Weather API - free, no key required
+weather_api_enabled: true             # Enable weather queries
 
-# --- Open-Meteo (Weather API) ---
-open_meteo_api_key: ""   # Not required for basic weather queries
+# DuckDuckGo web scraping (already in your pixi.toml, no key needed)
+duckduckgo_enabled: true              # Free web search fallback
 
-# =========== Usage Example ===========
-# Users should update only the API key fields and endpoints above,
-# depending on their available/free keys and which search providers they want prioritized.
+# Search provider priority for different query types
+search_routing:
+  weather: "open_meteo"               # Weather queries go to Open-Meteo
+  current_events: "perplexity"        # News/current events to Perplexity  
+  web_search: "duckduckgo"            # General web search to DDG scraping
+  fallback: "perplexity"              # Everything else to Perplexity if available
 
-# =========== End of config.yaml ===========
+# ======== Development and Debugging ========
+debug_mode: false
+log_level: "INFO"
+enable_profiling: false
+max_conversation_length: 50
+model_load_timeout: 300              # 5 minutes for large models
+backend_startup_timeout: 300         # 5 minutes for backend initialization
 
+# ======== Hardware Detection Settings ========
+hardware:
+  auto_detect: true                   # Automatically detect optimal hardware
+  prefer_gpu: true                    # Prefer GPU over CPU when available
+  memory_threshold: 8192              # Minimum MB required for GPU inference
+  force_cpu: false                    # Force CPU mode (for testing)

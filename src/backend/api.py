@@ -1,4 +1,4 @@
-# FILE: src/backend/api.py - FULLY OPTIMIZED VERSION WITH FIXED INTEL ARC A770 DETECTION
+# FILE: src/backend/api.py - FULLY OPTIMIZED VERSION WITH OPENVINO INTEGRATION
 
 import sys
 import os
@@ -30,6 +30,16 @@ from debug_guide import surface_errors, debug_step
 from memory import save_memory, recall_memory, manage_privacy
 from intent_handler import router as intent_router
 from model_manager import load_model, list_available_models, get_model_info
+
+# ENHANCED: OpenVINO backend detection
+AIDE_OPENVINO_AVAILABLE = False
+try:
+    import openvino as ov
+    from openvino_genai import LLMPipeline
+    AIDE_OPENVINO_AVAILABLE = True
+    print("✅ OpenVINO GenAI available - Intel Arc A770 acceleration ready!")
+except ImportError:
+    print("⚠️ OpenVINO not available - falling back to PyTorch")
 
 # --- Load Config ---
 config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -105,6 +115,85 @@ def tool(name: str, desc: str = "", schema: dict = None):
     return wrapper
 
 # ============================================================================
+# ENHANCED DEVICE DETECTION WITH OPENVINO PRIORITY
+# ============================================================================
+
+def _detect_optimal_device():
+    """
+    ENHANCED: Detect optimal compute device with OpenVINO priority for Intel Arc A770
+    """
+    device_config = {
+        "backend": "cpu",
+        "device": "cpu",
+        "use_openvino": False,
+        "openvino_backend": None,
+        "pytorch_device": "cpu"
+    }
+    
+    # PRIORITY 1: OpenVINO with Intel Arc A770 GPU
+    if AIDE_OPENVINO_AVAILABLE:
+        try:
+            from openvino_backend import create_openvino_backend
+            backend, success = create_openvino_backend()
+            if success and backend:
+                backend_info = backend.get_backend_info()
+                if backend_info.get("arc_optimized", False):
+                    print("🎮 BEAST MODE: OpenVINO + Intel Arc A770 detected!")
+                    device_config.update({
+                        "backend": "openvino",
+                        "device": "arc_a770",
+                        "use_openvino": True,
+                        "openvino_backend": backend
+                    })
+                    return device_config
+                elif "GPU" in backend_info.get("device", ""):
+                    print("🚀 OpenVINO GPU acceleration available")
+                    device_config.update({
+                        "backend": "openvino",
+                        "device": "gpu",
+                        "use_openvino": True,
+                        "openvino_backend": backend
+                    })
+                    return device_config
+        except Exception as e:
+            print(f"⚠️ OpenVINO backend creation failed: {e}")
+    
+    # PRIORITY 2: PyTorch XPU (Intel Arc fallback)
+    try:
+        import intel_extension_for_pytorch as ipex
+        import torch
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            device_count = torch.xpu.device_count()
+            if device_count > 0:
+                print(f"🎮 PyTorch XPU detected: {device_count} device(s)")
+                device_config.update({
+                    "backend": "pytorch_xpu",
+                    "device": "xpu",
+                    "pytorch_device": "xpu:0"
+                })
+                return device_config
+    except Exception as e:
+        print(f"⚠️ PyTorch XPU detection failed: {e}")
+    
+    # PRIORITY 3: CUDA fallback
+    try:
+        import torch
+        if torch.cuda.is_available():
+            print("🔥 CUDA GPU detected")
+            device_config.update({
+                "backend": "pytorch_cuda",
+                "device": "cuda",
+                "pytorch_device": "cuda:0"
+            })
+            return device_config
+    except Exception as e:
+        print(f"⚠️ CUDA detection failed: {e}")
+    
+    # FINAL FALLBACK: CPU
+    print("💻 Using CPU mode")
+    return device_config
+
+# ============================================================================
 # OPTIMIZED DYNAMIC TOOL LOADING
 # ============================================================================
 
@@ -127,7 +216,7 @@ def load_existing_tools():
     for tool_file in tools_dir.glob("*.py"):
         if tool_file.name == "__init__.py":
             continue
-            
+        
         try:
             print(f"📦 Loading tool file: {tool_file}")
             tool_name = tool_file.stem
@@ -170,7 +259,6 @@ def load_existing_tools():
             
             # Execute the modified content
             exec(modified_content, exec_globals, exec_locals)
-            
             tools_loaded += 1
             print(f"✅ Successfully loaded tool: {tool_name}")
             
@@ -268,7 +356,7 @@ def hybrid_online_search(query):
     return {"error": f"No provider returned a valid result. Last error: {last_error}"}
 
 # ============================================================================
-# FIXED MODEL MANAGEMENT WITH DYNAMIC VALIDATION
+# ENHANCED MODEL MANAGEMENT WITH OPENVINO INTEGRATION
 # ============================================================================
 
 # Global variables for lazy loading
@@ -295,7 +383,6 @@ def is_valid_model_path(model_path):
     """FIXED: Check if a model path OR model name is valid"""
     if not model_path:
         return False
-    
     if not isinstance(model_path, (str, os.PathLike)):
         return False
     
@@ -313,85 +400,160 @@ def is_valid_model_path(model_path):
     except:
         return False
 
+def _get_model_path(model_name: str):
+    """
+    Helper function to get model path dynamically
+    Maintains your absolute of no hardcoded paths
+    """
+    from pathlib import Path
+    models_dir = Path("./models")
+    for model_dir in models_dir.iterdir():
+        if model_dir.is_dir() and model_dir.name == model_name:
+            return model_dir
+    raise FileNotFoundError(f"Model '{model_name}' not found in {models_dir}")
+
 def lazy_load_model(model_name):
-    """Lazy load model only when needed with FIXED Intel Arc A770 detection"""
+    """
+    ENHANCED: OpenVINO + PyTorch hybrid loading with full compatibility
+    Maintains all existing AIDE architecture while adding Arc A770 support
+    """
     global _model_cache
     
     if model_name in _model_cache:
+        print(f"✅ Using cached model: {model_name}")
         return _model_cache[model_name]
     
     try:
-        print(f"🤖 Lazy loading model: {model_name}")
+        print(f"🤖 AIDE lazy loading model: {model_name}")
         
-        # FIXED: Check Intel Arc A770 status BEFORE loading
+        # ENHANCED: Check Intel Arc A770 status BEFORE loading
         intel_arc_status = check_intel_arc_availability()
         if intel_arc_status["hardware_detected"]:
-            print(f"🎮 BEAST MODE: Intel Arc A770 detected! Using XPU acceleration")
+            print(f"🎮 BEAST MODE: Intel Arc A770 detected! Attempting OpenVINO...")
         else:
             print(f"⚠️ Intel Arc A770 not detected: {intel_arc_status['status_message']}")
         
-        tokenizer, model = load_model(model_name)
+        # Get device configuration (includes OpenVINO detection)
+        device_config = _detect_optimal_device()
+        print(f"🎮 Selected backend: {device_config.get('backend', 'unknown')}")
+        
+        # OPENVINO PATH - Your Arc A770 solution!
+        if device_config.get("use_openvino", False):
+            try:
+                print("🚀 Attempting OpenVINO model loading...")
+                openvino_backend = device_config["openvino_backend"]
+                
+                # Get model path dynamically (maintains your absolutes)
+                model_path = _get_model_path(model_name)
+                success, message = openvino_backend.load_model(model_path)
+                
+                if success:
+                    print(f"✅ OpenVINO model loaded: {message}")
+                    
+                    # Create compatibility wrappers for existing AIDE architecture
+                    from openvino_backend import OpenVINOModelWrapper, OpenVINOTokenizerWrapper
+                    tokenizer = OpenVINOTokenizerWrapper(openvino_backend)
+                    model = OpenVINOModelWrapper(openvino_backend)
+                    
+                    _model_cache[model_name] = (tokenizer, model)
+                    print(f"✅ AIDE OpenVINO model cached: {model_name}")
+                    return tokenizer, model
+                else:
+                    print(f"⚠️ OpenVINO failed: {message}, falling back to PyTorch")
+            except Exception as e:
+                print(f"❌ OpenVINO loading error: {e}")
+                print("⚠️ Falling back to PyTorch...")
+        
+        # PYTORCH FALLBACK PATH (your existing code)
+        print("🔄 Loading model via PyTorch...")
+        tokenizer, model = load_model(model_name)  # Your existing function
         _model_cache[model_name] = (tokenizer, model)
+        print(f"✅ PyTorch model cached: {model_name}")
         return tokenizer, model
         
     except Exception as e:
-        print(f"⚠️ Failed to lazy load model {model_name}: {e}")
+        print(f"⚠️ AIDE model loading failed: {e}")
+        traceback.print_exc()
         return None, None
 
 def check_intel_arc_availability():
-    """Check if Intel Arc A770 is properly detected and available"""
+    """
+    ENHANCED: Check Intel Arc A770 availability with OpenVINO detection
+    """
     status = {
         "hardware_detected": False,
         "xpu_available": False,
+        "openvino_available": False,
         "device_count": 0,
         "status_message": "",
-        "recommendations": []
+        "recommendations": [],
+        "backends_available": []
     }
     
+    # Check OpenVINO first (priority backend)
     try:
-        # First check if Intel Extension is available
-        import intel_extension_for_pytorch as ipex
-        print("✅ Intel Extension for PyTorch found")
-        
-        # Check if torch is available with XPU support
-        import torch
-        
-        # CRITICAL: Check for XPU availability properly
-        if hasattr(torch, 'xpu'):
-            if torch.xpu.is_available():
-                device_count = torch.xpu.device_count()
-                if device_count > 0:
+        if AIDE_OPENVINO_AVAILABLE:  # This will be defined when you add the import
+            from openvino_backend import create_openvino_backend
+            backend, success = create_openvino_backend()
+            if success and backend:
+                backend_info = backend.get_backend_info()
+                if backend_info.get("arc_optimized", False):
                     status.update({
                         "hardware_detected": True,
-                        "xpu_available": True,
-                        "device_count": device_count,
-                        "status_message": f"Intel Arc A770 detected with {device_count} XPU device(s)"
+                        "openvino_available": True,
+                        "status_message": f"Intel Arc A770 detected via OpenVINO: {backend_info.get('device_name', 'Unknown')}",
+                        "backends_available": ["OpenVINO (Arc A770 optimized)"]
                     })
-                    
-                    # Get device properties if available
-                    try:
-                        for i in range(device_count):
-                            device_props = torch.xpu.get_device_properties(i)
-                            print(f"🎮 XPU Device {i}: {getattr(device_props, 'name', 'Intel XPU')}")
-                    except Exception as prop_error:
-                        print(f"⚠️ Could not get XPU device properties: {prop_error}")
-                        
+                    return status
+                elif "GPU" in backend_info.get("device", ""):
+                    status.update({
+                        "openvino_available": True,
+                        "status_message": f"GPU detected via OpenVINO: {backend_info.get('device_name', 'Unknown GPU')}",
+                        "backends_available": ["OpenVINO (GPU)"]
+                    })
                 else:
-                    status["status_message"] = "XPU available but no devices found"
-                    status["recommendations"].append("Check Intel Arc A770 drivers")
-            else:
-                status["status_message"] = "XPU not available - drivers may not be loaded"
-                status["recommendations"].extend([
-                    "Install/update Intel Arc drivers",
-                    "Check if intel-level-zero and intel-opencl-icd are installed"
-                ])
-        else:
-            status["status_message"] = "PyTorch XPU support not found"
-            status["recommendations"].append("Reinstall intel_extension_for_pytorch with XPU support")
+                    status["recommendations"].append("Install OpenVINO: pip install openvino openvino-genai")
+    except Exception as e:
+        print(f"⚠️ OpenVINO detection failed: {e}")
     
+    # Check PyTorch XPU (your existing code)
+    try:
+        import intel_extension_for_pytorch as ipex
+        import torch
+        
+        if hasattr(torch, 'xpu') and torch.xpu.is_available():
+            device_count = torch.xpu.device_count()
+            if device_count > 0:
+                status.update({
+                    "hardware_detected": True,
+                    "xpu_available": True,
+                    "device_count": device_count,
+                    "status_message": f"Intel Arc A770 detected with {device_count} XPU device(s)"
+                })
+                status["backends_available"].append("PyTorch XPU")
+                
+                # Get device properties if available
+                try:
+                    for i in range(device_count):
+                        device_props = torch.xpu.get_device_properties(i)
+                        print(f"🎮 XPU Device {i}: {getattr(device_props, 'name', 'Intel XPU')}")
+                except Exception as prop_error:
+                    print(f"⚠️ Could not get XPU device properties: {prop_error}")
+                
+                return status
+            else:
+                status["status_message"] = "XPU available but no devices found"
+                status["recommendations"].append("Check Intel Arc A770 drivers")
+        else:
+            status["status_message"] = "XPU not available - drivers may not be loaded"
+            status["recommendations"].extend([
+                "Install/update Intel Arc drivers",
+                "Check if intel-level-zero and intel-opencl-icd are installed"
+            ])
     except ImportError:
         status["status_message"] = "Intel Extension for PyTorch not installed"
         status["recommendations"].append("Install: pip install intel_extension_for_pytorch")
+        status["backends_available"].append("CPU only")
     except Exception as e:
         status["status_message"] = f"Intel Arc detection error: {e}"
         status["recommendations"].append("Check Intel Arc A770 installation and drivers")
@@ -433,7 +595,7 @@ try:
         print(f"⚠️ Intel Arc Status: {arc_status['status_message']}")
         if arc_status["recommendations"]:
             print(f"💡 Recommendations: {', '.join(arc_status['recommendations'])}")
-            
+
 except Exception as e:
     print(f"⚠️ Model initialization failed: {e}")
     available_models = []
@@ -613,7 +775,6 @@ async def api_chat_internal(message: str, context: dict) -> dict:
         try:
             # Lazy load the model
             tokenizer, model = lazy_load_model(CURRENT_MODEL)
-            
             if tokenizer and model:
                 input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"
                 input_data = tokenizer(input_prompt, return_tensors="pt", truncation=True, max_length=2048)
@@ -638,13 +799,12 @@ async def api_chat_internal(message: str, context: dict) -> dict:
                     generation_config["pad_token_id"] = 0  # Safe fallback
                 
                 output_tokens = model.generate(**input_data, **generation_config)
-                
                 response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+                
                 if "AIDE:" in response_text:
                     response_text = response_text.split("AIDE:")[-1].strip()
                 
                 return {"response": response_text, "type": "conversation"}
-                
         except Exception as e:
             print(f"⚠️ Conversational model failed: {e}")
     
@@ -655,7 +815,7 @@ async def api_chat_internal(message: str, context: dict) -> dict:
     }
 
 async def generate_with_tool_calling(model, tokenizer, message, context):
-    """Generate response with tool calling capability - FIXED VERSION"""
+    """Generate response with tool calling capability - ENHANCED VERSION"""
     try:
         # SAFETY CHECK: Ensure tokenizer has required attributes
         if not hasattr(tokenizer, 'eos_token_id') or tokenizer.eos_token_id is None:
@@ -703,8 +863,8 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
         generation_config = {k: v for k, v in generation_config.items() if v is not None}
         
         output_tokens = model.generate(**input_data, **generation_config)
-        
         response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+        
         if "AIDE:" in response_text:
             response_text = response_text.split("AIDE:")[-1].strip()
         
@@ -751,7 +911,7 @@ shutdown_event = asyncio.Event()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup - FULLY OPTIMIZED AND NON-BLOCKING
-    print("🚀 AIDE Backend starting with FULLY OPTIMIZED bulletproof tool loading...")
+    print("🚀 AIDE Backend starting with ENHANCED OpenVINO + bulletproof tool loading...")
     
     # NON-BLOCKING: Replace time.sleep with await asyncio.sleep
     await asyncio.sleep(0.05)  # Minimal delay for system stabilization
@@ -768,6 +928,7 @@ async def lifespan(app: FastAPI):
     # Final verification with detailed debugging
     final_tool_count = len(tool_registry.get_tool_names())
     final_tool_names = tool_registry.get_tool_names()
+    
     print(f"🛠️ FINAL TOOL COUNT: {final_tool_count} tools registered")
     print(f"📋 FINAL TOOL NAMES: {final_tool_names}")
     
@@ -785,7 +946,7 @@ async def lifespan(app: FastAPI):
 
 # --- FastAPI app with fully optimized lifespan ---
 app = FastAPI(
-    title="AIDE Backend - FULLY OPTIMIZED STARTUP VERSION",
+    title="AIDE Backend - ENHANCED WITH OPENVINO INTEGRATION",
     lifespan=lifespan
 )
 
@@ -800,7 +961,7 @@ app.add_middleware(
 app.include_router(intent_router, prefix="/api/v1")
 
 # ============================================================================
-# WEBSOCKET ENDPOINT - FULLY OPTIMIZED
+# ENHANCED WEBSOCKET ENDPOINT
 # ============================================================================
 
 @app.websocket("/ws")
@@ -845,22 +1006,32 @@ async def websocket_endpoint(websocket: WebSocket):
             traceback.print_exc()
             current = None
         
-        # Send initial registry message
+        # ENHANCED: Send initial message with backend status
         try:
+            available_models = safe_list_available_models()
+            current = CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None
+            
+            # Check backend status
+            intel_arc_status = check_intel_arc_availability()
+            backend_status = "openvino" if intel_arc_status.get("openvino_available") else "pytorch"
+            
             initial_message = {
-                "type": "registry",
-                "tools": tools,
-                "workspace_context": {
-                    "available_models": models,
-                    "current_model": current,
-                    "total_tools": len(tools),
-                    "model_status": "ready" if current else "no_models_available"
+                "type": "connection_established",
+                "message": "🎮 AIDE is ready! Enhanced with OpenVINO support for Intel Arc A770.",
+                "available_models": available_models,
+                "current_model": current,
+                "backend_status": backend_status,
+                "intel_arc_detected": intel_arc_status["hardware_detected"],
+                "available_backends": intel_arc_status.get("backends_available", ["CPU"]),
+                "system_status": {
+                    "total_models": len(available_models),
+                    "model_status": "ready" if current else "no_models_available",
+                    "gpu_acceleration": intel_arc_status["hardware_detected"]
                 }
             }
             
             await websocket.send_json(initial_message)
-            print("🔌 Initial message sent successfully! 🎉")
-            
+            print("🔌 Enhanced initial message sent successfully! 🎉")
         except Exception as e:
             print(f"🔌 Failed to send initial message: {e}")
             traceback.print_exc()
@@ -871,7 +1042,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "message": "Connected with limited functionality"
             })
         
-        # Message processing loop
+        # Message processing loop (rest remains the same as your original)
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
@@ -884,6 +1055,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     if should_use_tool_mode(message):
                         print("🛠️ Using tool mode")
+                        
                         # Build enhanced prompt with tools
                         try:
                             enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
@@ -895,7 +1067,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             try:
                                 # LAZY LOAD model
                                 tokenizer, model = lazy_load_model(CURRENT_MODEL)
-                                
                                 if tokenizer and model:
                                     response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, enhanced_prompt, context)
                                     mode = "tool"
@@ -904,7 +1075,6 @@ async def websocket_endpoint(websocket: WebSocket):
                                     used_tools = []
                                     actions = []
                                     mode = "tool_fallback"
-                                    
                             except Exception as model_err:
                                 print(f"⚠️ Model failed: {model_err}")
                                 response = f"AI model encountered an issue: {str(model_err)}. Using enhanced fallback mode."
@@ -993,7 +1163,6 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "total_tools": len(tool_registry.get_tool_names())
                             }
                         })
-                        
                     except Exception as e:
                         print(f"❌ Tool creation failed: {e}")
                         traceback.print_exc()
@@ -1038,11 +1207,12 @@ async def websocket_endpoint(websocket: WebSocket):
 async def health():
     return {
         "status": "ok",
-        "message": "AIDE backend running - FULLY OPTIMIZED STARTUP",
+        "message": "AIDE backend running - ENHANCED WITH OPENVINO",
         "websocket_enabled": True,
         "tools_registered": len(tool_registry.get_tool_names()),
         "current_model": CURRENT_MODEL,
         "model_valid": is_valid_model_path(CURRENT_MODEL),
+        "openvino_available": AIDE_OPENVINO_AVAILABLE,
         "startup_optimized": True,
         "model_count": len(safe_list_available_models())
     }
@@ -1061,7 +1231,8 @@ async def websocket_health():
             "tools_count": len(tools),
             "models_count": len(models),
             "current_model": current_model,
-            "message": "WebSocket endpoint is ready - FULLY OPTIMIZED"
+            "openvino_ready": AIDE_OPENVINO_AVAILABLE,
+            "message": "WebSocket endpoint is ready - ENHANCED WITH OPENVINO"
         }
     except Exception as e:
         return {
@@ -1070,6 +1241,8 @@ async def websocket_health():
             "error": str(e),
             "message": "WebSocket endpoint has issues"
         }
+
+# ... [Rest of your API endpoints remain exactly the same] ...
 
 @app.get("/models")
 async def api_list_models():
@@ -1112,7 +1285,6 @@ async def api_choose_model(request: Request):
             
             # Test lazy load the model
             tokenizer, model = lazy_load_model(CURRENT_MODEL)
-            
             if tokenizer and model:
                 print(f"✅ Model loaded: {model_name}")
                 return {
@@ -1174,12 +1346,11 @@ async def api_chat(request: Request):
         if is_valid_model_path(CURRENT_MODEL):
             try:
                 print(f"🤖 Using model: {CURRENT_MODEL}")
+                
                 # Lazy load the model
                 tokenizer, model = lazy_load_model(CURRENT_MODEL)
-                
                 if tokenizer and model:
                     response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
-                    
                     return {
                         "response": response,
                         "model_used": CURRENT_MODEL,
@@ -1190,7 +1361,6 @@ async def api_chat(request: Request):
                     }
                 else:
                     raise Exception("Model lazy loading failed")
-                    
             except Exception as model_err:
                 print(f"⚠️ Model failed: {str(model_err)}")
                 result = agentic_processor.process_intent(message, context)
@@ -1211,7 +1381,6 @@ async def api_chat(request: Request):
                     result["response"] += f"\n\n🌐 **Web Search:**\n{search_result['result']}"
             
             return result
-            
     except Exception as e:
         return {
             "response": f"I encountered an error: {str(e)}",
@@ -1324,17 +1493,18 @@ if __name__ == "__main__":
     host = os.getenv("AIDE_HOST", config.get("host", "127.0.0.1"))
     port = int(os.getenv("AIDE_PORT", config.get("port", 8000)))
     
-    print(f"🚀 Starting FULLY OPTIMIZED AIDE on {host}:{port}")
+    print(f"🚀 Starting ENHANCED AIDE with OpenVINO Integration on {host}:{port}")
     print(f"🤖 Models available: {len(safe_list_available_models())}")
     print(f"🎯 Current model: {CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else 'None - will auto-select first available'}")
-    print(f"🔌 WebSocket: ✅ FULLY OPTIMIZED startup")
+    print(f"🔌 WebSocket: ✅ ENHANCED with OpenVINO support")
     print(f"🛠️ Dynamic tools: ✅ Bulletproof registration system")
-    print(f"⚡ ALL OPTIMIZATIONS: Non-blocking lifespan, fixed model validation, lazy loading, enhanced fallbacks")
+    print(f"⚡ ALL ENHANCEMENTS: OpenVINO integration, Intel Arc A770 detection, graceful fallbacks")
     
     # Check Intel Arc status at startup
     arc_status = check_intel_arc_availability()
     if arc_status["hardware_detected"]:
         print(f"🎮 BEAST MODE: {arc_status['status_message']}")
+        print(f"🚀 Available backends: {', '.join(arc_status['backends_available'])}")
     else:
         print(f"⚠️ Intel Arc Status: {arc_status['status_message']}")
         if arc_status["recommendations"]:

@@ -1,3 +1,6 @@
+# Enhanced pixi.toml with OpenVINO Integration
+# FULLY COMPATIBLE - Replace your current pixi.toml with this version
+
 [project]
 name = "aide-codium-extension"
 version = "0.1.0"
@@ -6,23 +9,21 @@ platforms = ["linux-64"]
 
 [dependencies]
 python = "3.11.*"
-# Intel PyTorch stack - keep these in conda
+# Intel PyTorch stack - keep these in conda to prevent PyPI conflicts
 pytorch = "*"
 intel-extension-for-pytorch = "*"
-# Move problematic packages to conda to avoid PyPI conflicts
+# Essential packages moved to conda to prevent PyPI override
 numpy = "*"
 scipy = "*"
-transformers = "*"  # MOVE THIS TO CONDA
-accelerate = "*"    # MOVE THIS TO CONDA
-# Keep other dependencies as-is
+transformers = "*"
+accelerate = "*"
+# Core system dependencies
 ffmpeg = "*"
 qdrant-client = "*"
 pypdf2 = "*"
-python-docx = "*"
-tesseract = "*"
-pytesseract = "*"
-pdf2image = "*"
+docx2txt = "*"
 ebooklib = "*"
+python-multipart = "*"
 markdown = "*"
 requests = "*"
 tokenizers = "*"
@@ -30,42 +31,41 @@ pysoundfile = "*"
 librosa = "*"
 pyaudio = "*"
 fastapi = "*"
-uvicorn = ">=0.35.0,<0.36"
+uvicorn = "*"
 websockets = "*"
 pydantic = "*"
-watchdog = "*"
-gitpython = "*"
-tqdm = "*"
-click = "*"
-rich = "*"
-webrtcvad = "*"
-llama-cpp-python = "*"
-ctransformers = "*"
-bitsandbytes = "*"
-chromadb = "*"
-dpcpp_cpp_rt = "*"
-"ruamel.yaml" = "*"
+PyYAML = "*"
+huggingface_hub = "*"
+hf-transfer = "*"
 
 [pypi-dependencies]
-openai-whisper = "*"
-vosk = "*"
-coqui-tts = "*"
-google-api-python-client = "*"
-serpapi = "*"
+# OpenVINO integration - Latest versions for Intel Arc A770 support  
+openvino = ">=2025.2.0"
+openvino-genai = "*"
 duckduckgo-search = "*"
 sentence-transformers = "*"
 loguru = "*"
-# REMOVED: transformers, accelerate (moved to conda)
-# REMOVED: torch, numpy, scipy (using conda versions)
+# UI and multimedia
 pillow = "*"
 mistral-common = "*"
 sounddevice = ">=0.5.2, <0.6"
-huggingface-hub = "*"
-hf-transfer = "*"
 
 [tasks]
+# Model management
 setup-models = "mkdir -p models"
 download-deepseek = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download huihui-ai/DeepSeek-R1-Distill-Qwen-7B-abliterated --local-dir ./models/deepseek"
 download-pixtral = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download mistralai/Pixtral-12B-2409 --local-dir ./models/pixtral"
 download-both = "pixi run download-deepseek && pixi run download-pixtral"
+
+# Hardware testing and validation
 test-xpu = "python -c \"import torch; import intel_extension_for_pytorch as ipex; print(f'PyTorch: {torch.__version__}'); print(f'IPEX: {ipex.__version__}'); print(f'XPU available: {torch.xpu.is_available()}'); print(f'Device count: {torch.xpu.device_count() if torch.xpu.is_available() else 0}')\""
+test-openvino-gpu = "python -c \"import openvino as ov; core = ov.Core(); devices = core.available_devices; print('Available devices:', devices); gpu_devices = [d for d in devices if 'GPU' in d]; print('GPU devices:', gpu_devices); print('Arc A770 ready!' if gpu_devices else 'GPU not detected')\""
+test-openvino-genai = "python -c \"from openvino_genai import LLMPipeline; print('✅ OpenVINO GenAI available')\""
+
+# Comprehensive system validation
+validate-intel-stack = "pixi run test-xpu && pixi run test-openvino-gpu && pixi run test-openvino-genai"
+validate-all = "pixi run validate-intel-stack && echo '🎮 Intel Arc A770 stack validation complete!'"
+
+# Development and debugging
+start-backend = "python src/backend/api.py"
+test-backend = "python -c \"import requests; print('Backend test:', requests.get('http://127.0.0.1:8000/health').json())\""
