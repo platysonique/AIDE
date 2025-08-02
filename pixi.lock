@@ -367,9 +367,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zlib-1.3.1-hb9d3cd8_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstandard-0.23.0-py311h9ecbd09_2.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb8e6e7a_2.conda
+      - pypi: https://files.pythonhosted.org/packages/3f/27/4570e78fc0bf5ea0ca45eb1de3818a23787af9b390c0b0a0033a1b8236f9/diskcache-5.6.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/db/72/c027b3b488b1010cf71670032fcf7e681d44b81829d484bb04e31a949a8d/duckduckgo_search-8.1.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/fe/54/c86cd8e011fe98803d7e382fd67c0df5ceab8d2b7ad8c5a81524f791551c/jsonschema-4.25.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/01/0e/b27cdbaccf30b890c40ed1da9fd4a3593a5cf94dae54fb34f8a4b74fcd3f/jsonschema_specifications-2025.4.1-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/84/ac/9d0c433b850ec32860c677d09a077e7e9a332c1dbe1443db5acc9d47d162/llama_cpp_python-0.3.14.tar.gz
       - pypi: https://files.pythonhosted.org/packages/0c/29/0348de65b8cc732daa3e33e67806420b2ae89bdce2b04af740289c5c6c8c/loguru-0.7.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/c8/23/bfc9da018375ea1bf31cf94f325d98904003cd6891007ae900d70fc7bcf9/mistral_common-1.8.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3a/d0/edc009c27b406c4f9cbc79274d6e46d634d139075492ad055e3d68445925/numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
@@ -1132,6 +1134,11 @@ packages:
   - pkg:pypi/dill?source=hash-mapping
   size: 87553
   timestamp: 1690101185422
+- pypi: https://files.pythonhosted.org/packages/3f/27/4570e78fc0bf5ea0ca45eb1de3818a23787af9b390c0b0a0033a1b8236f9/diskcache-5.6.3-py3-none-any.whl
+  name: diskcache
+  version: 5.6.3
+  sha256: 5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19
+  requires_python: '>=3'
 - conda: https://conda.anaconda.org/conda-forge/noarch/dnspython-2.7.0-pyhff2d567_1.conda
   sha256: 3ec40ccf63f2450c5e6c7dd579e42fc2e97caf0d8cd4ba24aa434e6fc264eda0
   md5: 5fbd60d61d21b4bd2f9d7a48fe100418
@@ -3338,6 +3345,38 @@ packages:
   purls: []
   size: 60963
   timestamp: 1727963148474
+- pypi: https://files.pythonhosted.org/packages/84/ac/9d0c433b850ec32860c677d09a077e7e9a332c1dbe1443db5acc9d47d162/llama_cpp_python-0.3.14.tar.gz
+  name: llama-cpp-python
+  version: 0.3.14
+  sha256: c7ffd71685923a911206a40e972c1ec739aa21032100fdc8618316571b173507
+  requires_dist:
+  - typing-extensions>=4.5.0
+  - numpy>=1.20.0
+  - diskcache>=5.6.1
+  - jinja2>=2.11.3
+  - uvicorn>=0.22.0 ; extra == 'server'
+  - fastapi>=0.100.0 ; extra == 'server'
+  - pydantic-settings>=2.0.1 ; extra == 'server'
+  - sse-starlette>=1.6.1 ; extra == 'server'
+  - starlette-context>=0.3.6,<0.4 ; extra == 'server'
+  - pyyaml>=5.1 ; extra == 'server'
+  - pytest>=7.4.0 ; extra == 'test'
+  - httpx>=0.24.1 ; extra == 'test'
+  - scipy>=1.10 ; extra == 'test'
+  - fastapi>=0.100.0 ; extra == 'test'
+  - sse-starlette>=1.6.1 ; extra == 'test'
+  - starlette-context>=0.3.6,<0.4 ; extra == 'test'
+  - pydantic-settings>=2.0.1 ; extra == 'test'
+  - huggingface-hub>=0.23.0 ; extra == 'test'
+  - black>=23.3.0 ; extra == 'dev'
+  - twine>=4.0.2 ; extra == 'dev'
+  - mkdocs>=1.4.3 ; extra == 'dev'
+  - mkdocstrings[python]>=0.22.0 ; extra == 'dev'
+  - mkdocs-material>=9.1.18 ; extra == 'dev'
+  - pytest>=7.4.0 ; extra == 'dev'
+  - httpx>=0.24.1 ; extra == 'dev'
+  - llama-cpp-python[server,test,dev] ; extra == 'all'
+  requires_python: '>=3.8'
 - conda: https://conda.anaconda.org/conda-forge/linux-64/llvmlite-0.44.0-py311h9c9ff8c_1.conda
   sha256: 48e91296af21ce96ea4dc6adca6bd5528aeda3b717d9a3e72e63e4909a142ef2
   md5: eb6be2d03a0f5b259ae00427a6cb1b73

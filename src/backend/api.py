@@ -1,8 +1,11 @@
-# FILE: src/backend/api.py - FULLY OPTIMIZED VERSION WITH OPENVINO INTEGRATION
+# FILE: src/backend/api.py - FULLY OPTIMIZED VERSION WITH STREAMING & ENHANCED TOOLS + LLAMACPP
 
 import sys
 import os
 from pathlib import Path
+import torch
+import asyncio
+import json
 
 # Ensure backend directory is in Python path FIRST
 backend_dir = str(Path(__file__).parent)
@@ -14,8 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import requests
 import yaml
-import json
-import asyncio
 import tempfile
 import importlib.util
 from typing import Dict, List, Any, Callable
@@ -30,6 +31,15 @@ from debug_guide import surface_errors, debug_step
 from memory import save_memory, recall_memory, manage_privacy
 from intent_handler import router as intent_router
 from model_manager import load_model, list_available_models, get_model_info
+
+# NEW: Add llama.cpp backend support
+try:
+    from llamacpp_backend import AIDE_LlamaCpp_Backend, LlamaCppModelWrapper, LlamaCppTokenizerWrapper, create_llamacpp_backend
+    AIDE_LLAMACPP_AVAILABLE = True
+    print("✅ AIDE llama.cpp backend available - GGUF models ready!")
+except ImportError as e:
+    AIDE_LLAMACPP_AVAILABLE = False
+    print(f"⚠️ AIDE llama.cpp backend not available: {e}")
 
 # ENHANCED: OpenVINO backend detection
 AIDE_OPENVINO_AVAILABLE = False
@@ -53,6 +63,244 @@ except FileNotFoundError:
 api_keys = config.get("api_keys", {})
 fallback_order = config.get("fallback_order", ["duckduckgo", "wikipedia"])
 providers = [config.get("online_search", "duckduckgo")] + fallback_order
+
+# ============================================================================
+# UNIVERSAL STREAMING RESPONSE IMPLEMENTATION (SUPPORTS ALL BACKENDS)
+# ============================================================================
+
+async def generate_streaming_response(model, tokenizer, message: str, context: dict, websocket: WebSocket):
+    """Universal streaming that works with PyTorch, OpenVINO, and llama.cpp"""
+    try:
+        # Build prompt
+        available_tools = tool_registry.serialize()
+        search_tools = list(PROVIDER_FUNCS.keys())
+        current_file = context.get("currentFile", {})
+        workspace = context.get("workspace", {})
+        
+        system_prompt = (
+            "You are AIDE, an advanced coding assistant. "
+            f"Available tools: {json.dumps(available_tools, indent=2)}\n"
+            f"Search providers: {search_tools}\n"
+            f"Workspace: {workspace.get('name', 'None')}\n"
+            f"File: {current_file.get('filename', 'None')}\n"
+            f"User: {message}\nAIDE:"
+        )
+        
+        # NEW: Check if it's llama.cpp backend (PRIORITY 1)
+        if hasattr(model, 'backend') and hasattr(model.backend, 'generate_stream'):
+            print("🚀 Using llama.cpp streaming generation")
+            try:
+                response_text = ""
+                for chunk in model.backend.generate_stream(system_prompt, 
+                                                         max_tokens=512,
+                                                         temperature=0.8,
+                                                         top_p=0.95):
+                    response_text += chunk
+                    await websocket.send_json({
+                        "type": "stream_chunk",
+                        "chunk": chunk,
+                        "complete": False
+                    })
+                    await asyncio.sleep(0.01)  # Non-blocking
+                    
+                await websocket.send_json({
+                    "type": "stream_complete", 
+                    "full_response": response_text,
+                    "complete": True
+                })
+                
+                return response_text, [], []
+                
+            except Exception as e:
+                error_msg = f"llama.cpp streaming failed: {str(e)}"
+                await websocket.send_json({
+                    "type": "stream_error",
+                    "error": error_msg,
+                    "complete": True
+                })
+                return error_msg, [], []
+        
+        # Check if it's OpenVINO backend (PRIORITY 2)
+        elif hasattr(model, 'backend') and hasattr(model.backend, 'generate_response'):
+            print("🚀 Using OpenVINO streaming generation")
+            try:
+                # OpenVINO doesn't have native streaming, so we simulate it
+                response = model.backend.generate_response(system_prompt, max_tokens=512, temperature=0.8)
+                
+                # Stream the response character by character for real-time feel
+                for i, char in enumerate(response):
+                    await websocket.send_json({
+                        "type": "stream_chunk",
+                        "chunk": char,
+                        "complete": False
+                    })
+                    await asyncio.sleep(0.02)  # Adjust speed as needed
+                
+                await websocket.send_json({
+                    "type": "stream_complete",
+                    "full_response": response,
+                    "complete": True
+                })
+                
+                return response, [], []
+                
+            except Exception as e:
+                error_msg = f"OpenVINO streaming failed: {str(e)}"
+                await websocket.send_json({
+                    "type": "stream_error",
+                    "error": error_msg,
+                    "complete": True
+                })
+                return error_msg, [], []
+        
+        # PyTorch streaming path (PRIORITY 3 - your existing code)
+        else:
+            print("🚀 Using PyTorch streaming generation")
+            # Immediate acknowledgment
+            await websocket.send_json({
+                "type": "stream_start",
+                "message": "🚀 Generating response..."
+            })
+
+            input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=1024)
+
+            if hasattr(model, 'device'):
+                input_data = {k: v.to(model.device) for k, v in input_data.items()}
+
+            # CRITICAL FIX: Use model.generate() with streaming callback
+            generation_config = {
+                "max_new_tokens": 150,  # Much shorter for faster response
+                "do_sample": True,
+                "temperature": 0.8,
+                "pad_token_id": tokenizer.eos_token_id or 0,
+                "no_repeat_ngram_size": 3,  # Prevent loops
+            }
+
+            # Generate in one go, then stream the output character by character
+            with torch.no_grad():
+                output_tokens = model.generate(**input_data, **generation_config)
+
+            # Decode the full response
+            full_response = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+
+            # Extract just the assistant's response
+            if "AIDE:" in full_response:
+                assistant_response = full_response.split("AIDE:")[-1].strip()
+            else:
+                assistant_response = full_response[len(system_prompt):].strip()
+
+            # Stream it character by character for that real-time feel
+            for i, char in enumerate(assistant_response):
+                await websocket.send_json({
+                    "type": "stream_chunk",
+                    "chunk": char,
+                    "complete": False
+                })
+                # Small delay between characters
+                await asyncio.sleep(0.03)  # Adjust for speed preference
+
+            # Send completion signal
+            await websocket.send_json({
+                "type": "stream_complete",
+                "full_response": assistant_response,
+                "complete": True
+            })
+
+            return assistant_response, [], []
+
+    except Exception as e:
+        error_msg = f"Streaming generation failed: {str(e)}"
+        print(f"⚠️ {error_msg}")
+        await websocket.send_json({
+            "type": "stream_error",
+            "error": error_msg,
+            "complete": True
+        })
+        return error_msg, [], []
+
+async def generate_local_streaming_response(model, tokenizer, message: str, context: dict, websocket: WebSocket):
+    """Fallback local model streaming with proper chunking"""
+    try:
+        system_prompt = (
+            "You are AIDE, an advanced coding assistant. "
+            f"User: {message}\nAIDE:"
+        )
+
+        input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
+
+        if hasattr(model, 'device'):
+            input_data = {k: v.to(model.device) for k, v in input_data.items()}
+
+        response_text = ""
+        pad_token_id = tokenizer.eos_token_id or tokenizer.pad_token_id or 0
+        generated_ids = input_data['input_ids'].clone()
+        attention_mask = input_data.get('attention_mask', None)
+
+        # FIXED: Proper streaming generation with shorter max tokens
+        for step in range(256):  # Reduced from 512 for more concise responses
+            with torch.no_grad():
+                outputs = model(
+                    input_ids=generated_ids,
+                    attention_mask=attention_mask,
+                    use_cache=True
+                )
+
+                logits = outputs.logits[:, -1, :]
+
+                # Apply temperature for variety
+                if 0.8 != 1.0:
+                    logits = logits / 0.8
+
+                # Sample next token
+                probs = torch.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+
+                # Check for stopping condition
+                if next_token.item() == tokenizer.eos_token_id or next_token.item() == pad_token_id:
+                    break
+
+                # Append to generated sequence
+                generated_ids = torch.cat([generated_ids, next_token], dim=-1)
+
+                # Decode the new token
+                new_token_text = tokenizer.decode(next_token[0], skip_special_tokens=True)
+                response_text += new_token_text
+
+                # Send streaming chunk to WebSocket
+                await websocket.send_json({
+                    "type": "stream_chunk",
+                    "chunk": new_token_text,
+                    "complete": False
+                })
+
+                # CRITICAL: Allow other async tasks to run
+                await asyncio.sleep(0.01)
+
+                # Update attention mask for next iteration
+                if attention_mask is not None:
+                    attention_mask = torch.cat([
+                        attention_mask,
+                        torch.ones((attention_mask.shape[0], 1), device=attention_mask.device)
+                    ], dim=-1)
+
+        # Send completion signal
+        await websocket.send_json({
+            "type": "stream_complete",
+            "full_response": response_text,
+            "complete": True
+        })
+
+        return response_text, [], []
+
+    except Exception as e:
+        error_msg = f"Local streaming generation failed: {str(e)}"
+        print(f"⚠️ {error_msg}")
+        await websocket.send_json({
+            "type": "stream_error",
+            "error": error_msg,
+            "complete": True
+        })
+        return error_msg, [], []
 
 # ============================================================================
 # BULLETPROOF TOOL REGISTRY SYSTEM
@@ -115,22 +363,61 @@ def tool(name: str, desc: str = "", schema: dict = None):
     return wrapper
 
 # ============================================================================
-# ENHANCED DEVICE DETECTION WITH OPENVINO PRIORITY
+# ENHANCED DEVICE DETECTION WITH LLAMACPP + OPENVINO PRIORITY
 # ============================================================================
 
 def _detect_optimal_device():
     """
-    ENHANCED: Detect optimal compute device with OpenVINO priority for Intel Arc A770
+    ENHANCED: llama.cpp + OpenVINO + Intel Arc A770 detection with backend priorities
     """
+    import torch
+    
     device_config = {
         "backend": "cpu",
         "device": "cpu",
+        "use_llamacpp": False,
         "use_openvino": False,
+        "llamacpp_backend": None,
         "openvino_backend": None,
         "pytorch_device": "cpu"
     }
     
-    # PRIORITY 1: OpenVINO with Intel Arc A770 GPU
+    # PRIORITY 1: TRY LLAMA.CPP FIRST - Best performance for GGUF models!
+    if AIDE_LLAMACPP_AVAILABLE:
+        try:
+            print("🔍 Attempting llama.cpp backend detection...")
+            llamacpp_backend, success = create_llamacpp_backend()
+            if success and llamacpp_backend:
+                backend_info = llamacpp_backend.get_backend_info()
+                print(f"🚀 llama.cpp backend info: {backend_info}")
+                
+                if backend_info.get("arc_optimized", False):
+                    print("🎮 BEAST MODE: Intel Arc A770 + llama.cpp detected!")
+                    device_config.update({
+                        "backend": "llamacpp",
+                        "device": "arc_a770_llamacpp",
+                        "use_llamacpp": True,
+                        "llamacpp_backend": llamacpp_backend,
+                        "use_openvino": False,
+                        "pytorch_device": "cpu"
+                    })
+                    return device_config
+                else:
+                    print("🚀 Using llama.cpp CPU optimization")
+                    device_config.update({
+                        "backend": "llamacpp",
+                        "device": "cpu_llamacpp", 
+                        "use_llamacpp": True,
+                        "llamacpp_backend": llamacpp_backend,
+                        "use_openvino": False,
+                        "pytorch_device": "cpu"
+                    })
+                    return device_config
+        except Exception as e:
+            print(f"⚠️ AIDE llama.cpp detection failed: {e}")
+            traceback.print_exc()
+
+    # PRIORITY 2: OpenVINO with Intel Arc A770 GPU
     if AIDE_OPENVINO_AVAILABLE:
         try:
             from openvino_backend import create_openvino_backend
@@ -157,8 +444,8 @@ def _detect_optimal_device():
                     return device_config
         except Exception as e:
             print(f"⚠️ OpenVINO backend creation failed: {e}")
-    
-    # PRIORITY 2: PyTorch XPU (Intel Arc fallback)
+
+    # PRIORITY 3: PyTorch XPU (Intel Arc fallback)
     try:
         import intel_extension_for_pytorch as ipex
         import torch
@@ -174,8 +461,8 @@ def _detect_optimal_device():
                 return device_config
     except Exception as e:
         print(f"⚠️ PyTorch XPU detection failed: {e}")
-    
-    # PRIORITY 3: CUDA fallback
+
+    # PRIORITY 4: CUDA fallback
     try:
         import torch
         if torch.cuda.is_available():
@@ -188,85 +475,10 @@ def _detect_optimal_device():
             return device_config
     except Exception as e:
         print(f"⚠️ CUDA detection failed: {e}")
-    
+
     # FINAL FALLBACK: CPU
     print("💻 Using CPU mode")
     return device_config
-
-# ============================================================================
-# OPTIMIZED DYNAMIC TOOL LOADING
-# ============================================================================
-
-def load_existing_tools():
-    """Load tools from the tools directory - OPTIMIZED VERSION"""
-    tools_dir = Path(__file__).parent / "tools"
-    
-    # Create tools directory if it doesn't exist
-    if not tools_dir.exists():
-        print("🔍 Tools directory doesn't exist, creating it...")
-        tools_dir.mkdir(exist_ok=True)
-    
-    print(f"🔍 Loading tools from: {tools_dir}")
-    
-    # Add directories to Python path
-    if str(tools_dir) not in sys.path:
-        sys.path.insert(0, str(tools_dir))
-    
-    tools_loaded = 0
-    for tool_file in tools_dir.glob("*.py"):
-        if tool_file.name == "__init__.py":
-            continue
-        
-        try:
-            print(f"📦 Loading tool file: {tool_file}")
-            tool_name = tool_file.stem
-            
-            # Read and modify the file content to inject our registry
-            file_content = tool_file.read_text(encoding='utf-8')
-            modified_content = file_content
-            
-            import_patterns = [
-                ("from backend.api import tool", "# INJECTED: Using global registry"),
-                ("from backend.api import tool, hybrid_online_search", "# INJECTED: Using global registry"),
-                ("from ..api import tool", "# INJECTED: Using global registry"),
-                ("from .api import tool", "# INJECTED: Using global registry"),
-                ("from api import tool", "# INJECTED: Using global registry")
-            ]
-            
-            for old_import, replacement in import_patterns:
-                if old_import in modified_content:
-                    modified_content = modified_content.replace(old_import, replacement)
-            
-            # Execute with proper globals that include our instances
-            exec_globals = {
-                '__name__': f'tools.{tool_name}',
-                '__file__': str(tool_file),
-                '__builtins__': __builtins__,
-                # Inject our global instances
-                'tool_registry': tool_registry,
-                'tool': tool,
-                'hybrid_online_search': hybrid_online_search,
-                # Add common imports that tools might need
-                'Path': Path,
-                'os': os,
-                'json': json,
-                'requests': requests,
-                'asyncio': asyncio,
-            }
-            
-            # Create empty locals dict
-            exec_locals = {}
-            
-            # Execute the modified content
-            exec(modified_content, exec_globals, exec_locals)
-            tools_loaded += 1
-            print(f"✅ Successfully loaded tool: {tool_name}")
-            
-        except Exception as e:
-            print(f"❌ Failed to load tool {tool_file}: {e}")
-            traceback.print_exc()
-    
-    print(f"📦 Tool loading complete: {tools_loaded} files processed")
 
 # ============================================================================
 # SEARCH PROVIDER FUNCTIONS
@@ -319,7 +531,6 @@ def search_wolframalpha(query):
 
 def search_open_meteo(query):
     try:
-        # Simple weather query - you can enhance this with proper location parsing
         url = "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current_weather=true"
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
@@ -352,11 +563,86 @@ def hybrid_online_search(query):
             except Exception as e:
                 last_error = f"{provider}: {str(e)}"
                 continue
-    
     return {"error": f"No provider returned a valid result. Last error: {last_error}"}
 
 # ============================================================================
-# ENHANCED MODEL MANAGEMENT WITH OPENVINO INTEGRATION
+# OPTIMIZED DYNAMIC TOOL LOADING
+# ============================================================================
+
+def load_existing_tools():
+    """Load tools from the tools directory - OPTIMIZED VERSION"""
+    tools_dir = Path(__file__).parent / "tools"
+    
+    # Create tools directory if it doesn't exist
+    if not tools_dir.exists():
+        print("🔍 Tools directory doesn't exist, creating it...")
+        tools_dir.mkdir(exist_ok=True)
+
+    print(f"🔍 Loading tools from: {tools_dir}")
+    
+    # Add directories to Python path
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+
+    tools_loaded = 0
+    for tool_file in tools_dir.glob("*.py"):
+        if tool_file.name == "__init__.py":
+            continue
+        
+        try:
+            print(f"📦 Loading tool file: {tool_file}")
+            tool_name = tool_file.stem
+            
+            # Read and modify the file content to inject our registry
+            file_content = tool_file.read_text(encoding='utf-8')
+            modified_content = file_content
+
+            import_patterns = [
+                ("from backend.api import tool", "# INJECTED: Using global registry"),
+                ("from backend.api import tool, hybrid_online_search", "# INJECTED: Using global registry"),
+                ("from ..api import tool", "# INJECTED: Using global registry"),
+                ("from .api import tool", "# INJECTED: Using global registry"),
+                ("from api import tool", "# INJECTED: Using global registry")
+            ]
+
+            for old_import, replacement in import_patterns:
+                if old_import in modified_content:
+                    modified_content = modified_content.replace(old_import, replacement)
+
+            # Execute with proper globals that include our instances
+            exec_globals = {
+                '__name__': f'tools.{tool_name}',
+                '__file__': str(tool_file),
+                '__builtins__': __builtins__,
+                # Inject our global instances
+                'tool_registry': tool_registry,
+                'tool': tool,
+                'hybrid_online_search': hybrid_online_search,
+                # Add common imports that tools might need
+                'Path': Path,
+                'os': os,
+                'json': json,
+                'requests': requests,
+                'asyncio': asyncio,
+            }
+            
+            # Create empty locals dict
+            exec_locals = {}
+            
+            # Execute the modified content
+            exec(modified_content, exec_globals, exec_locals)
+            
+            tools_loaded += 1
+            print(f"✅ Successfully loaded tool: {tool_name}")
+            
+        except Exception as e:
+            print(f"❌ Failed to load tool {tool_file}: {e}")
+            traceback.print_exc()
+
+    print(f"📦 Tool loading complete: {tools_loaded} files processed")
+
+# ============================================================================
+# ENHANCED MODEL MANAGEMENT WITH LLAMACPP + OPENVINO INTEGRATION
 # ============================================================================
 
 # Global variables for lazy loading
@@ -369,7 +655,7 @@ def safe_list_available_models():
     global _available_models_cache
     if _available_models_cache is not None:
         return _available_models_cache
-    
+
     try:
         models = list_available_models()
         _available_models_cache = models if models else []
@@ -385,7 +671,7 @@ def is_valid_model_path(model_path):
         return False
     if not isinstance(model_path, (str, os.PathLike)):
         return False
-    
+
     # CRUCIAL FIX: Check if it's a discovered model name first
     try:
         available_models = safe_list_available_models()
@@ -393,7 +679,7 @@ def is_valid_model_path(model_path):
             return True
     except Exception:
         pass
-    
+
     # Fallback: check if it's a direct file/directory path
     try:
         return os.path.exists(str(model_path))
@@ -414,47 +700,61 @@ def _get_model_path(model_name: str):
 
 def lazy_load_model(model_name):
     """
-    ENHANCED: OpenVINO + PyTorch hybrid loading with full compatibility
-    Maintains all existing AIDE architecture while adding Arc A770 support
+    ENHANCED: llama.cpp PRIORITY + OpenVINO + PyTorch hybrid loading
     """
     global _model_cache
-    
+
     if model_name in _model_cache:
         print(f"✅ Using cached model: {model_name}")
         return _model_cache[model_name]
-    
+
     try:
         print(f"🤖 AIDE lazy loading model: {model_name}")
-        
-        # ENHANCED: Check Intel Arc A770 status BEFORE loading
-        intel_arc_status = check_intel_arc_availability()
-        if intel_arc_status["hardware_detected"]:
-            print(f"🎮 BEAST MODE: Intel Arc A770 detected! Attempting OpenVINO...")
+
+        # Get model path
+        if model_name == "root-model":
+            model_path = Path("./models")
         else:
-            print(f"⚠️ Intel Arc A770 not detected: {intel_arc_status['status_message']}")
-        
-        # Get device configuration (includes OpenVINO detection)
+            model_path = _get_model_path(model_name)
+
+        # ENHANCED DEVICE DETECTION (now includes llama.cpp as Priority 1)
         device_config = _detect_optimal_device()
-        print(f"🎮 Selected backend: {device_config.get('backend', 'unknown')}")
-        
+
+        # NEW: LLAMA.CPP PATH - Your GGUF solution!
+        if device_config.get("use_llamacpp", False):
+            try:
+                print("🚀 Loading model via llama.cpp backend...")
+                llamacpp_backend = device_config["llamacpp_backend"]
+                success, message = llamacpp_backend.load_model(model_path)
+
+                if success:
+                    print(f"✅ llama.cpp model loaded successfully: {message}")
+                    # Create compatibility wrappers
+                    tokenizer = LlamaCppTokenizerWrapper(llamacpp_backend)
+                    model = LlamaCppModelWrapper(llamacpp_backend)
+
+                    _model_cache[model_name] = (tokenizer, model)
+                    print(f"✅ AIDE llama.cpp model cached: {model_name}")
+                    return tokenizer, model
+                else:
+                    print(f"⚠️ llama.cpp failed: {message}, falling back to OpenVINO")
+            except Exception as e:
+                print(f"❌ llama.cpp loading failed: {e}")
+                print("⚠️ Falling back to OpenVINO...")
+
         # OPENVINO PATH - Your Arc A770 solution!
         if device_config.get("use_openvino", False):
             try:
                 print("🚀 Attempting OpenVINO model loading...")
                 openvino_backend = device_config["openvino_backend"]
                 
-                # Get model path dynamically (maintains your absolutes)
-                model_path = _get_model_path(model_name)
                 success, message = openvino_backend.load_model(model_path)
-                
                 if success:
                     print(f"✅ OpenVINO model loaded: {message}")
-                    
                     # Create compatibility wrappers for existing AIDE architecture
                     from openvino_backend import OpenVINOModelWrapper, OpenVINOTokenizerWrapper
                     tokenizer = OpenVINOTokenizerWrapper(openvino_backend)
                     model = OpenVINOModelWrapper(openvino_backend)
-                    
                     _model_cache[model_name] = (tokenizer, model)
                     print(f"✅ AIDE OpenVINO model cached: {model_name}")
                     return tokenizer, model
@@ -463,14 +763,14 @@ def lazy_load_model(model_name):
             except Exception as e:
                 print(f"❌ OpenVINO loading error: {e}")
                 print("⚠️ Falling back to PyTorch...")
-        
+
         # PYTORCH FALLBACK PATH (your existing code)
         print("🔄 Loading model via PyTorch...")
         tokenizer, model = load_model(model_name)  # Your existing function
         _model_cache[model_name] = (tokenizer, model)
         print(f"✅ PyTorch model cached: {model_name}")
         return tokenizer, model
-        
+
     except Exception as e:
         print(f"⚠️ AIDE model loading failed: {e}")
         traceback.print_exc()
@@ -478,19 +778,40 @@ def lazy_load_model(model_name):
 
 def check_intel_arc_availability():
     """
-    ENHANCED: Check Intel Arc A770 availability with OpenVINO detection
+    ENHANCED: Check Intel Arc A770 availability with llama.cpp + OpenVINO detection
     """
     status = {
         "hardware_detected": False,
         "xpu_available": False,
         "openvino_available": False,
+        "llamacpp_available": False,
         "device_count": 0,
         "status_message": "",
         "recommendations": [],
         "backends_available": []
     }
-    
-    # Check OpenVINO first (priority backend)
+
+    # Check llama.cpp first (priority backend)
+    if AIDE_LLAMACPP_AVAILABLE:
+        try:
+            llamacpp_backend, success = create_llamacpp_backend()
+            if success and llamacpp_backend:
+                backend_info = llamacpp_backend.get_backend_info()
+                if backend_info.get("arc_optimized", False):
+                    status.update({
+                        "hardware_detected": True,
+                        "llamacpp_available": True,
+                        "status_message": f"Intel Arc A770 detected via llama.cpp: {backend_info.get('device_name', 'Arc GPU')}",
+                        "backends_available": ["llama.cpp (Arc A770 optimized)"]
+                    })
+                    return status
+                else:
+                    status["llamacpp_available"] = True
+                    status["backends_available"].append("llama.cpp (CPU optimized)")
+        except Exception as e:
+            print(f"⚠️ llama.cpp detection failed: {e}")
+
+    # Check OpenVINO second (priority backend)
     try:
         if AIDE_OPENVINO_AVAILABLE:  # This will be defined when you add the import
             from openvino_backend import create_openvino_backend
@@ -515,12 +836,11 @@ def check_intel_arc_availability():
                     status["recommendations"].append("Install OpenVINO: pip install openvino openvino-genai")
     except Exception as e:
         print(f"⚠️ OpenVINO detection failed: {e}")
-    
+
     # Check PyTorch XPU (your existing code)
     try:
         import intel_extension_for_pytorch as ipex
         import torch
-        
         if hasattr(torch, 'xpu') and torch.xpu.is_available():
             device_count = torch.xpu.device_count()
             if device_count > 0:
@@ -531,7 +851,7 @@ def check_intel_arc_availability():
                     "status_message": f"Intel Arc A770 detected with {device_count} XPU device(s)"
                 })
                 status["backends_available"].append("PyTorch XPU")
-                
+
                 # Get device properties if available
                 try:
                     for i in range(device_count):
@@ -539,7 +859,6 @@ def check_intel_arc_availability():
                         print(f"🎮 XPU Device {i}: {getattr(device_props, 'name', 'Intel XPU')}")
                 except Exception as prop_error:
                     print(f"⚠️ Could not get XPU device properties: {prop_error}")
-                
                 return status
             else:
                 status["status_message"] = "XPU available but no devices found"
@@ -557,7 +876,7 @@ def check_intel_arc_availability():
     except Exception as e:
         status["status_message"] = f"Intel Arc detection error: {e}"
         status["recommendations"].append("Check Intel Arc A770 installation and drivers")
-    
+
     return status
 
 def validate_current_model():
@@ -571,22 +890,22 @@ def validate_current_model():
 try:
     available_models = safe_list_available_models()
     CURRENT_MODEL = config.get("model")
-    
+
     # Auto-select first available model if config is null or invalid
     if not CURRENT_MODEL and available_models:
         CURRENT_MODEL = available_models[0]
         print(f"🤖 Auto-selected model: {CURRENT_MODEL}")
-    
+
     # Validate the selection (with fixed validation function)
     validate_current_model()
-    
+
     # Final fallback: if still invalid, try first available again
     if not CURRENT_MODEL and available_models:
         CURRENT_MODEL = available_models[0]
         print(f"🤖 Fallback to first available model: {CURRENT_MODEL}")
-    
+
     print(f"🤖 Model initialization: Found {len(available_models)} models, current: {CURRENT_MODEL}")
-    
+
     # Check Intel Arc status at startup
     arc_status = check_intel_arc_availability()
     if arc_status["hardware_detected"]:
@@ -608,7 +927,7 @@ except Exception as e:
 def should_use_tool_mode(message: str) -> bool:
     """Determine if we should use tool mode or conversation mode"""
     message_lower = message.lower()
-    
+
     # Discussion patterns suggest conversation mode
     discussion_patterns = [
         "i think", "i believe", "i'm worried", "i'm concerned",
@@ -616,19 +935,19 @@ def should_use_tool_mode(message: str) -> bool:
         "do you think", "opinion", "thoughts on", "feelings about",
         "problem with", "issue with", "concerns about", "discuss"
     ]
-    
+
     # Command patterns suggest tool mode
     command_patterns = [
         "read the", "search for", "find the", "analyze the", "check the",
         "show me", "help me", "can you", "please", "go ahead and"
     ]
-    
+
     if any(pattern in message_lower for pattern in discussion_patterns):
         return False
-    
+
     if any(pattern in message_lower for pattern in command_patterns):
         return True
-    
+
     # Default to tool mode if we have a valid model, conversation mode otherwise
     return is_valid_model_path(CURRENT_MODEL)
 
@@ -636,7 +955,7 @@ def build_react_prompt_with_tools(message: str, context: dict, tools: List[dict]
     """Build a ReAct-style prompt with available tools"""
     workspace_folders = context.get('workspace_folders', [])
     active_file = context.get('active_file', 'None')
-    
+
     return f"""You are AIDE, an autonomous coding assistant.
 
 IMPORTANT: Only take Action if the user is giving you a direct command or request.
@@ -680,22 +999,22 @@ class AgenticIntentProcessor:
         """Process user intent and return appropriate response"""
         message_lower = message.lower()
         detected_intents = []
-        
+
         for intent, keywords in self.intent_patterns.items():
             if any(keyword in message_lower for keyword in keywords):
                 detected_intents.append(intent)
-        
+
         if not detected_intents:
             detected_intents = ["general_help"]
-        
+
         response_parts = []
         suggested_actions = []
-        
+
         for intent in detected_intents:
             intent_response = self._handle_intent(intent, message, context)
             response_parts.append(intent_response["response"])
             suggested_actions.extend(intent_response["actions"])
-        
+
         return {
             "response": "\n\n".join(response_parts),
             "actions": suggested_actions,
@@ -706,7 +1025,7 @@ class AgenticIntentProcessor:
         """Handle specific intent"""
         current_file = context.get("currentFile", {})
         workspace = context.get("workspace", {})
-        
+
         responses = {
             "code_review": {
                 "response": f"I'll help you review the code. {self._get_file_context_message(current_file)}",
@@ -737,7 +1056,7 @@ class AgenticIntentProcessor:
                 ]
             }
         }
-        
+
         return responses.get(intent, responses["general_help"])
 
     def _get_file_context_message(self, current_file: Dict[str, Any]) -> str:
@@ -756,9 +1075,11 @@ class AgenticIntentProcessor:
         messages = []
         if workspace and workspace.get("name"):
             messages.append(f"I can see you're working in the '{workspace['name']}' workspace.")
+
         if current_file and current_file.get("filename"):
             filename = current_file["filename"].split("/")[-1]
             messages.append(f"Currently viewing: {filename}")
+
         return " ".join(messages) if messages else "Open a workspace and file to get started!"
 
 agentic_processor = AgenticIntentProcessor()
@@ -770,18 +1091,19 @@ agentic_processor = AgenticIntentProcessor()
 async def api_chat_internal(message: str, context: dict) -> dict:
     """Internal chat API for conversation mode with lazy loading"""
     system_prompt = """I'm AIDE, your intelligent coding assistant. I can help with code review, debugging, testing, documentation, and more. I have access to tools and can provide both conversational responses and technical assistance."""
-    
+
     if CURRENT_MODEL and is_valid_model_path(CURRENT_MODEL):
         try:
             # Lazy load the model
             tokenizer, model = lazy_load_model(CURRENT_MODEL)
+
             if tokenizer and model:
                 input_prompt = f"{system_prompt}\n\nUser: {message}\nAIDE:"
                 input_data = tokenizer(input_prompt, return_tensors="pt", truncation=True, max_length=2048)
-                
+
                 if hasattr(model, 'device'):
                     input_data = {k: v.to(model.device) for k, v in input_data.items()}
-                
+
                 # FIXED: Safe generation with proper tokenizer handling
                 generation_config = {
                     "max_new_tokens": 512,
@@ -789,7 +1111,7 @@ async def api_chat_internal(message: str, context: dict) -> dict:
                     "temperature": 0.8,
                     "top_p": 0.95
                 }
-                
+
                 # Handle pad_token_id safely
                 if hasattr(tokenizer, 'eos_token_id') and tokenizer.eos_token_id is not None:
                     generation_config["pad_token_id"] = tokenizer.eos_token_id
@@ -797,17 +1119,18 @@ async def api_chat_internal(message: str, context: dict) -> dict:
                     generation_config["pad_token_id"] = tokenizer.pad_token_id
                 else:
                     generation_config["pad_token_id"] = 0  # Safe fallback
-                
+
                 output_tokens = model.generate(**input_data, **generation_config)
                 response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-                
+
                 if "AIDE:" in response_text:
                     response_text = response_text.split("AIDE:")[-1].strip()
-                
+
                 return {"response": response_text, "type": "conversation"}
+
         except Exception as e:
             print(f"⚠️ Conversational model failed: {e}")
-    
+
     # Enhanced fallback with context awareness
     return {
         "response": f"I understand you're asking about: {message}. I can help with code analysis, debugging, file operations, and web searches. What would you like me to do?",
@@ -823,18 +1146,18 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
                 tokenizer.eos_token_id = tokenizer.pad_token_id
             else:
                 tokenizer.eos_token_id = 0  # Fallback
-        
+
         # Get available tools safely
         try:
             available_tools = tool_registry.serialize()
         except Exception as e:
             print(f"⚠️ Tool serialization in generate_with_tool_calling failed: {e}")
             available_tools = []
-        
+
         search_tools = list(PROVIDER_FUNCS.keys())
         current_file = context.get("currentFile", {})
         workspace = context.get("workspace", {})
-        
+
         system_prompt = (
             "You are AIDE, an advanced coding assistant. "
             f"Available tools: {json.dumps(available_tools, indent=2)}\n"
@@ -844,37 +1167,49 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
             "Use TOOL[tool_name] to invoke tools.\n\n"
             f"User: {message}\nAIDE:"
         )
-        
-        input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
-        
-        if hasattr(model, 'device'):
-            input_data = {k: v.to(model.device) for k, v in input_data.items()}
-        
-        # Safe generation configuration
-        generation_config = {
-            "max_new_tokens": 512,
-            "do_sample": True,
-            "temperature": 0.8,
-            "top_p": 0.95,
-            "pad_token_id": tokenizer.eos_token_id
-        }
-        
-        # Remove None values from config
-        generation_config = {k: v for k, v in generation_config.items() if v is not None}
-        
-        output_tokens = model.generate(**input_data, **generation_config)
-        response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-        
-        if "AIDE:" in response_text:
-            response_text = response_text.split("AIDE:")[-1].strip()
-        
+
+        # Check if it's llama.cpp backend
+        if hasattr(model, 'backend') and hasattr(model.backend, 'generate_response'):
+            try:
+                response_text = model.backend.generate_response(
+                    system_prompt, 
+                    max_tokens=512,
+                    temperature=0.8
+                )
+            except Exception as e:
+                response_text = f"Model generation failed: {str(e)}"
+        else:
+            # Original PyTorch/OpenVINO path
+            input_data = tokenizer(system_prompt, return_tensors="pt", truncation=True, max_length=2048)
+
+            if hasattr(model, 'device'):
+                input_data = {k: v.to(model.device) for k, v in input_data.items()}
+
+            # Safe generation configuration
+            generation_config = {
+                "max_new_tokens": 512,
+                "do_sample": True,
+                "temperature": 0.8,
+                "top_p": 0.95,
+                "pad_token_id": tokenizer.eos_token_id
+            }
+
+            # Remove None values from config
+            generation_config = {k: v for k, v in generation_config.items() if v is not None}
+
+            output_tokens = model.generate(**input_data, **generation_config)
+            response_text = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
+
+            if "AIDE:" in response_text:
+                response_text = response_text.split("AIDE:")[-1].strip()
+
         # Look for tool invocations
         tool_pattern = re.compile(r"TOOL\[(\w+)\]", re.I)
         tools_found = tool_pattern.findall(response_text)
-        
+
         used_tools = []
         actions = []
-        
+
         for tool in set(tools_found):
             if tool.lower() in PROVIDER_FUNCS:
                 try:
@@ -884,6 +1219,7 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
                     response_text += f"\n\n**{tool} Result:**\n{result}"
                 except Exception as e:
                     response_text += f"\n\n*{tool} error: {str(e)}*"
+
             elif tool_registry.exists(tool):
                 try:
                     result = tool_registry.call(tool)
@@ -892,9 +1228,9 @@ async def generate_with_tool_calling(model, tokenizer, message, context):
                     response_text += f"\n\n**{tool} Result:**\n{json.dumps(result, indent=2)}"
                 except Exception as e:
                     response_text += f"\n\n*{tool} error: {str(e)}*"
-        
+
         return response_text, used_tools, actions
-        
+
     except Exception as e:
         error_msg = f"Model generation failed: {str(e)}"
         print(f"⚠️ {error_msg}")
@@ -911,42 +1247,43 @@ shutdown_event = asyncio.Event()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup - FULLY OPTIMIZED AND NON-BLOCKING
-    print("🚀 AIDE Backend starting with ENHANCED OpenVINO + bulletproof tool loading...")
-    
+    print("🚀 AIDE Backend starting with ENHANCED streaming + codebase analysis + llama.cpp...")
+
     # NON-BLOCKING: Replace time.sleep with await asyncio.sleep
     await asyncio.sleep(0.05)  # Minimal delay for system stabilization
-    
+
     # Load tools from directory
     print(f"📊 Pre-loading tool count: {len(tool_registry.get_tool_names())}")
     print(f"📋 Pre-loading tools: {tool_registry.get_tool_names()}")
-    
+
     load_existing_tools()
-    
+
     # NON-BLOCKING: Give tools time to register
     await asyncio.sleep(0.05)  # Minimal delay
-    
+
     # Final verification with detailed debugging
     final_tool_count = len(tool_registry.get_tool_names())
     final_tool_names = tool_registry.get_tool_names()
-    
+
     print(f"🛠️ FINAL TOOL COUNT: {final_tool_count} tools registered")
     print(f"📋 FINAL TOOL NAMES: {final_tool_names}")
-    
+
     # Debug the registry state
     print(f"🔍 Registry internal state: {len(tool_registry._tools)} tools in _tools dict")
     print(f"🔍 Registry keys: {list(tool_registry._tools.keys())}")
-    
-    print(f"🔌 WebSocket enabled with generous timeout handling")
+
+    print(f"🔌 WebSocket enabled with streaming responses")
+    print(f"🚀 llama.cpp support: {'✅ Ready' if AIDE_LLAMACPP_AVAILABLE else '⚠️ Not available'}")
     print(f"🤖 Model system: {'✅ Ready with ' + str(CURRENT_MODEL) if is_valid_model_path(CURRENT_MODEL) else '⚠️ No valid model - fallback mode'}")
-    
+
     yield  # This is where the app runs
-    
+
     # Shutdown (optional cleanup)
     print("🛑 AIDE Backend shutting down gracefully...")
 
 # --- FastAPI app with fully optimized lifespan ---
 app = FastAPI(
-    title="AIDE Backend - ENHANCED WITH OPENVINO INTEGRATION",
+    title="AIDE Backend - ENHANCED WITH STREAMING + CODEBASE ANALYSIS + LLAMACPP",
     lifespan=lifespan
 )
 
@@ -961,7 +1298,7 @@ app.add_middleware(
 app.include_router(intent_router, prefix="/api/v1")
 
 # ============================================================================
-# ENHANCED WEBSOCKET ENDPOINT
+# ENHANCED WEBSOCKET ENDPOINT WITH STREAMING
 # ============================================================================
 
 @app.websocket("/ws")
@@ -973,13 +1310,13 @@ async def websocket_endpoint(websocket: WebSocket):
             ("Access-Control-Allow-Credentials", "true")
         ])
         print("🔌 WebSocket accepted successfully!")
-        
+
         # Add to active connections
         active_connections.add(websocket)
-        
+
         # Minimal startup delay - OPTIMIZED
         await asyncio.sleep(0.05)  # Reduced to minimal
-        
+
         # Get tools and models safely
         try:
             tools = tool_registry.serialize()
@@ -989,7 +1326,7 @@ async def websocket_endpoint(websocket: WebSocket):
             print(f"🔌 Tool registry serialization failed: {e}")
             traceback.print_exc()
             tools = []
-        
+
         try:
             models = safe_list_available_models()
             print(f"🔌 Models: {len(models)} found")
@@ -997,7 +1334,7 @@ async def websocket_endpoint(websocket: WebSocket):
             print(f"🔌 Model listing error: {e}")
             traceback.print_exc()
             models = []
-        
+
         try:
             current = CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None
             print(f"🔌 Current model: {current}")
@@ -1005,33 +1342,54 @@ async def websocket_endpoint(websocket: WebSocket):
             print(f"🔌 Current model error: {e}")
             traceback.print_exc()
             current = None
-        
+
         # ENHANCED: Send initial message with backend status
         try:
             available_models = safe_list_available_models()
             current = CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None
-            
+
             # Check backend status
             intel_arc_status = check_intel_arc_availability()
-            backend_status = "openvino" if intel_arc_status.get("openvino_available") else "pytorch"
-            
+            backend_status = "llamacpp" if intel_arc_status.get("llamacpp_available") else (
+                "openvino" if intel_arc_status.get("openvino_available") else "pytorch"
+            )
+
+            # Get workspace context automatically
+            workspace_context = {}
+            try:
+                from tools.get_context import get_context
+                workspace_context = get_context()
+            except:
+                workspace_context = {"error": "Could not get workspace context"}
+
             initial_message = {
                 "type": "connection_established",
-                "message": "🎮 AIDE is ready! Enhanced with OpenVINO support for Intel Arc A770.",
+                "message": "🎮 AIDE is ready! Enhanced with llama.cpp + streaming responses + full codebase analysis!",
                 "available_models": available_models,
                 "current_model": current,
                 "backend_status": backend_status,
                 "intel_arc_detected": intel_arc_status["hardware_detected"],
                 "available_backends": intel_arc_status.get("backends_available", ["CPU"]),
+                "workspace_context": workspace_context,
+                "tools_available": [
+                    "read_file - Read any file in your codebase",
+                    "analyze_codebase - Analyze entire project structure", 
+                    "get_context - Get current workspace context",
+                    "online_search - Search the web"
+                ],
                 "system_status": {
                     "total_models": len(available_models),
                     "model_status": "ready" if current else "no_models_available",
-                    "gpu_acceleration": intel_arc_status["hardware_detected"]
+                    "gpu_acceleration": intel_arc_status["hardware_detected"],
+                    "tools_loaded": len(tool_registry.get_tool_names()),
+                    "streaming_enabled": True,
+                    "llamacpp_enabled": AIDE_LLAMACPP_AVAILABLE
                 }
             }
-            
+
             await websocket.send_json(initial_message)
             print("🔌 Enhanced initial message sent successfully! 🎉")
+
         except Exception as e:
             print(f"🔌 Failed to send initial message: {e}")
             traceback.print_exc()
@@ -1041,73 +1399,90 @@ async def websocket_endpoint(websocket: WebSocket):
                 "tools": [],
                 "message": "Connected with limited functionality"
             })
-        
-        # Message processing loop (rest remains the same as your original)
+
+        # Message processing loop with STREAMING
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=30.0)
                 msg_type = data.get("type")
-                
+
                 if msg_type == "query":
                     message = data.get("message", "")
                     context = data.get("context", {})
                     print(f"🤖 Processing query: {message[:50]}...")
-                    
+
+                    # Send initial "thinking" message
+                    await websocket.send_json({
+                        "type": "thinking",
+                        "message": "🤔 Analyzing with AI model..."
+                    })
+
                     if should_use_tool_mode(message):
-                        print("🛠️ Using tool mode")
-                        
-                        # Build enhanced prompt with tools
-                        try:
-                            enhanced_prompt = build_react_prompt_with_tools(message, context, tool_registry.serialize())
-                        except Exception as e:
-                            print(f"🔌 Tool serialization for prompt failed: {e}")
-                            enhanced_prompt = f"You are AIDE. User: {message}"
-                        
+                        print("🛠️ Using streaming tool mode")
+
                         if is_valid_model_path(CURRENT_MODEL):
                             try:
-                                # LAZY LOAD model
+                                # LAZY LOAD model for streaming
                                 tokenizer, model = lazy_load_model(CURRENT_MODEL)
                                 if tokenizer and model:
-                                    response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, enhanced_prompt, context)
-                                    mode = "tool"
+                                    # Use universal streaming generation
+                                    response, used_tools, actions = await generate_streaming_response(
+                                        model, tokenizer, message, context, websocket
+                                    )
+                                    mode = "streaming_tool"
                                 else:
-                                    response = "Model failed to load. Using enhanced fallback mode."
-                                    used_tools = []
-                                    actions = []
-                                    mode = "tool_fallback"
+                                    await websocket.send_json({
+                                        "type": "response",
+                                        "data": {"response": "Model failed to load. Using enhanced fallback mode."},
+                                        "mode": "tool_fallback"
+                                    })
+                                    continue
                             except Exception as model_err:
                                 print(f"⚠️ Model failed: {model_err}")
-                                response = f"AI model encountered an issue: {str(model_err)}. Using enhanced fallback mode."
-                                used_tools = []
-                                actions = []
-                                mode = "tool_fallback"
+                                await websocket.send_json({
+                                    "type": "response", 
+                                    "data": {"response": f"AI model encountered an issue: {str(model_err)}. Using enhanced fallback mode."},
+                                    "mode": "tool_fallback"
+                                })
+                                continue
                         else:
-                            response = "No AI model available. Using enhanced fallback mode - I can still help with file operations and web searches!"
-                            used_tools = []
-                            actions = []
-                            mode = "tool_fallback"
-                        
-                        response_data = {
-                            "response": response,
-                            "tools_invoked": used_tools,
-                            "actions": actions
-                        }
+                            await websocket.send_json({
+                                "type": "response",
+                                "data": {"response": "No AI model available. Using enhanced fallback mode - I can still help with file operations and web searches!"},
+                                "mode": "tool_fallback"
+                            })
+                            continue
                     else:
-                        print("💬 Using chat mode")
-                        response_data = await api_chat_internal(message, context)
-                        mode = "chat"
-                    
-                    await websocket.send_json({
-                        "type": "response",
-                        "data": response_data,
-                        "mode": mode
-                    })
-                
+                        print("💬 Using streaming chat mode")
+                        # Implement streaming for chat mode too
+                        if CURRENT_MODEL and is_valid_model_path(CURRENT_MODEL):
+                            try:
+                                tokenizer, model = lazy_load_model(CURRENT_MODEL)
+                                if tokenizer and model:
+                                    response, _, _ = await generate_streaming_response(
+                                        model, tokenizer, message, context, websocket
+                                    )
+                                    mode = "streaming_chat"
+                                else:
+                                    await websocket.send_json({
+                                        "type": "response",
+                                        "data": {"response": f"I understand you're asking about: {message}. I can help with code analysis, debugging, file operations, and web searches. What would you like me to do?"},
+                                        "mode": "chat_fallback"
+                                    })
+                                    continue
+                            except Exception as e:
+                                await websocket.send_json({
+                                    "type": "response",
+                                    "data": {"response": f"I understand you're asking about: {message}. I can help with code analysis, debugging, file operations, and web searches. What would you like me to do?"},
+                                    "mode": "chat_fallback"
+                                })
+                                continue
+
                 elif msg_type == "invoke":
                     tool_name = data.get("tool")
                     args = data.get("args", {})
                     print(f"🔧 Invoking tool: {tool_name}")
-                    
+
                     if tool_registry.exists(tool_name):
                         try:
                             result = tool_registry.call(tool_name, **args)
@@ -1126,33 +1501,33 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": f"Tool {tool_name} not found. Available: {tool_registry.get_tool_names()}"
                         })
-                
+
                 elif msg_type == "propose_new_tool":
                     try:
                         name = data.get("name")
                         code = data.get("code")
                         print(f"🏗️ Creating tool: {name}")
-                        
+
                         # Create tool file
                         tools_dir = Path(__file__).parent / "tools"
                         tools_dir.mkdir(exist_ok=True)
                         tool_file = tools_dir / f"{name}.py"
+
                         tool_file.write_text(code, encoding="utf-8")
-                        
                         await asyncio.sleep(0.05)
-                        
+
                         # Execute the new tool file
                         spec = importlib.util.spec_from_file_location(name, str(tool_file))
                         module = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(module)
-                        
+
                         # Send updated registry
                         try:
                             serialized_tools = tool_registry.serialize()
                         except Exception as e:
                             print(f"🔌 Tool serialization for new tool response failed: {e}")
                             serialized_tools = []
-                        
+
                         await websocket.send_json({
                             "type": "registry",
                             "tools": serialized_tools,
@@ -1163,6 +1538,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "total_tools": len(tool_registry.get_tool_names())
                             }
                         })
+
                     except Exception as e:
                         print(f"❌ Tool creation failed: {e}")
                         traceback.print_exc()
@@ -1170,7 +1546,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "error",
                             "message": f"Failed to create tool: {str(e)}"
                         })
-            
+
             except asyncio.TimeoutError:
                 print("⏰ WebSocket message timeout - client may be slow")
                 continue
@@ -1189,7 +1565,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                 except:
                     print("🔌 Failed to send error - connection may be dead")
-    
+
     except WebSocketDisconnect:
         print("🔌 WebSocket disconnected normally")
     except Exception as e:
@@ -1207,8 +1583,10 @@ async def websocket_endpoint(websocket: WebSocket):
 async def health():
     return {
         "status": "ok",
-        "message": "AIDE backend running - ENHANCED WITH OPENVINO",
+        "message": "AIDE backend running - ENHANCED WITH STREAMING + CODEBASE ANALYSIS + LLAMACPP",
         "websocket_enabled": True,
+        "streaming_enabled": True,
+        "llamacpp_enabled": AIDE_LLAMACPP_AVAILABLE,
         "tools_registered": len(tool_registry.get_tool_names()),
         "current_model": CURRENT_MODEL,
         "model_valid": is_valid_model_path(CURRENT_MODEL),
@@ -1224,16 +1602,19 @@ async def websocket_health():
         tools = tool_registry.serialize()
         models = safe_list_available_models()
         current_model = CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else None
-        
+
         return {
             "status": "ok",
             "websocket_ready": True,
+            "streaming_ready": True,
+            "llamacpp_ready": AIDE_LLAMACPP_AVAILABLE,
             "tools_count": len(tools),
             "models_count": len(models),
             "current_model": current_model,
             "openvino_ready": AIDE_OPENVINO_AVAILABLE,
-            "message": "WebSocket endpoint is ready - ENHANCED WITH OPENVINO"
+            "message": "WebSocket endpoint ready with streaming + llama.cpp support"
         }
+
     except Exception as e:
         return {
             "status": "error",
@@ -1242,7 +1623,9 @@ async def websocket_health():
             "message": "WebSocket endpoint has issues"
         }
 
-# ... [Rest of your API endpoints remain exactly the same] ...
+# ============================================================================
+# ALL OTHER REST API ENDPOINTS (unchanged from your original)
+# ============================================================================
 
 @app.get("/models")
 async def api_list_models():
@@ -1253,7 +1636,8 @@ async def api_list_models():
         "total_available": len(models),
         "discovery_method": "filesystem_scan",
         "current_valid": is_valid_model_path(CURRENT_MODEL),
-        "lazy_loading": True
+        "lazy_loading": True,
+        "llamacpp_enabled": AIDE_LLAMACPP_AVAILABLE
     }
 
 @app.post("/models/use")
@@ -1261,10 +1645,10 @@ async def api_choose_model(request: Request):
     global CURRENT_MODEL
     data = await request.json()
     model_name = data.get("name")
-    
+
     if not model_name:
         return {"error": "No model name provided"}
-    
+
     available_models = safe_list_available_models()
     if model_name not in available_models:
         return {
@@ -1272,17 +1656,17 @@ async def api_choose_model(request: Request):
             "available": available_models,
             "suggestion": "Check models/ directory"
         }
-    
+
     try:
         CURRENT_MODEL = model_name
         validate_current_model()
-        
+
         if is_valid_model_path(CURRENT_MODEL):
             # Clear cache to force reload
             global _model_cache
             if CURRENT_MODEL in _model_cache:
                 del _model_cache[CURRENT_MODEL]
-            
+
             # Test lazy load the model
             tokenizer, model = lazy_load_model(CURRENT_MODEL)
             if tokenizer and model:
@@ -1291,7 +1675,8 @@ async def api_choose_model(request: Request):
                     "status": "success",
                     "active": CURRENT_MODEL,
                     "message": f"Successfully switched to {model_name}",
-                    "lazy_loaded": True
+                    "lazy_loaded": True,
+                    "backend": "llamacpp" if hasattr(model, 'backend') and hasattr(model.backend, 'generate_stream') else "pytorch"
                 }
             else:
                 return {
@@ -1303,6 +1688,7 @@ async def api_choose_model(request: Request):
                 "error": f"Model path invalid: {model_name}",
                 "current": CURRENT_MODEL
             }
+
     except Exception as e:
         return {
             "error": f"Failed to load model {model_name}: {str(e)}",
@@ -1325,12 +1711,13 @@ async def api_current_model():
             "available_models": safe_list_available_models(),
             "suggestion": "Use POST /models/use to activate a model"
         }
-    
+
     return {
         "current_model": CURRENT_MODEL,
         "status": "active",
         "valid": True,
-        "lazy_loaded": CURRENT_MODEL in _model_cache
+        "lazy_loaded": CURRENT_MODEL in _model_cache,
+        "llamacpp_enabled": AIDE_LLAMACPP_AVAILABLE
     }
 
 @app.post("/chat")
@@ -1338,22 +1725,25 @@ async def api_chat(request: Request):
     data = await request.json()
     message = data.get("message", "")
     context = data.get("context", {})
-    
+
     if not message:
         return {"error": "No message provided"}
-    
+
     try:
         if is_valid_model_path(CURRENT_MODEL):
             try:
                 print(f"🤖 Using model: {CURRENT_MODEL}")
-                
+
                 # Lazy load the model
                 tokenizer, model = lazy_load_model(CURRENT_MODEL)
+
                 if tokenizer and model:
                     response, used_tools, actions = await generate_with_tool_calling(model, tokenizer, message, context)
+                    backend_type = "llamacpp" if hasattr(model, 'backend') and hasattr(model.backend, 'generate_stream') else "pytorch"
                     return {
                         "response": response,
                         "model_used": CURRENT_MODEL,
+                        "backend": backend_type,
                         "actions": actions,
                         "tools_invoked": used_tools,
                         "conversation_type": "llm_first",
@@ -1361,6 +1751,7 @@ async def api_chat(request: Request):
                     }
                 else:
                     raise Exception("Model lazy loading failed")
+
             except Exception as model_err:
                 print(f"⚠️ Model failed: {str(model_err)}")
                 result = agentic_processor.process_intent(message, context)
@@ -1372,15 +1763,16 @@ async def api_chat(request: Request):
             result = agentic_processor.process_intent(message, context)
             result["fallback_reason"] = "No valid model loaded"
             result["conversation_type"] = "enhanced_fallback"
-            
+
             # Add web search for relevant queries
             search_keywords = ["search", "find", "look up", "what is", "who is", "when did", "how to"]
             if any(keyword in message.lower() for keyword in search_keywords):
                 search_result = hybrid_online_search(message)
                 if "result" in search_result:
                     result["response"] += f"\n\n🌐 **Web Search:**\n{search_result['result']}"
-            
+
             return result
+
     except Exception as e:
         return {
             "response": f"I encountered an error: {str(e)}",
@@ -1438,10 +1830,10 @@ async def api_ingest_document(request: Request):
     data = await request.json()
     file_path = data.get("file_path")
     file_name = data.get("file_name")
-    
+
     if not file_path:
         return {"error": "No file path provided"}
-    
+
     try:
         return {
             "status": "success",
@@ -1449,6 +1841,7 @@ async def api_ingest_document(request: Request):
             "file_path": file_path,
             "file_name": file_name
         }
+
     except Exception as e:
         return {
             "status": "error",
@@ -1460,9 +1853,9 @@ async def force_shutdown():
     """Force shutdown endpoint that kills the process"""
     import os
     import signal
-    
+
     print("🛑 FORCE SHUTDOWN REQUESTED - TERMINATING NOW")
-    
+
     # Close all WebSocket connections immediately
     for connection in active_connections.copy():
         try:
@@ -1470,13 +1863,13 @@ async def force_shutdown():
         except:
             pass
     active_connections.clear()
-    
+
     # Set shutdown event
     shutdown_event.set()
-    
+
     # Give it 1 second then force kill
     asyncio.create_task(delayed_force_exit())
-    
+
     return {"status": "shutting_down", "message": "Process will terminate in 1 second"}
 
 async def delayed_force_exit():
@@ -1492,14 +1885,15 @@ async def delayed_force_exit():
 if __name__ == "__main__":
     host = os.getenv("AIDE_HOST", config.get("host", "127.0.0.1"))
     port = int(os.getenv("AIDE_PORT", config.get("port", 8000)))
-    
-    print(f"🚀 Starting ENHANCED AIDE with OpenVINO Integration on {host}:{port}")
+
+    print(f"🚀 Starting ENHANCED AIDE with llama.cpp + Streaming + Codebase Analysis on {host}:{port}")
     print(f"🤖 Models available: {len(safe_list_available_models())}")
     print(f"🎯 Current model: {CURRENT_MODEL if is_valid_model_path(CURRENT_MODEL) else 'None - will auto-select first available'}")
-    print(f"🔌 WebSocket: ✅ ENHANCED with OpenVINO support")
+    print(f"🔌 WebSocket: ✅ ENHANCED with streaming support")
+    print(f"🚀 llama.cpp: {'✅ READY - GGUF models supported!' if AIDE_LLAMACPP_AVAILABLE else '⚠️ Not available'}")
     print(f"🛠️ Dynamic tools: ✅ Bulletproof registration system")
-    print(f"⚡ ALL ENHANCEMENTS: OpenVINO integration, Intel Arc A770 detection, graceful fallbacks")
-    
+    print(f"⚡ ALL ENHANCEMENTS: llama.cpp integration, streaming responses, enhanced file reading, full codebase analysis")
+
     # Check Intel Arc status at startup
     arc_status = check_intel_arc_availability()
     if arc_status["hardware_detected"]:
@@ -1509,5 +1903,5 @@ if __name__ == "__main__":
         print(f"⚠️ Intel Arc Status: {arc_status['status_message']}")
         if arc_status["recommendations"]:
             print(f"💡 To enable Intel Arc A770: {', '.join(arc_status['recommendations'])}")
-    
+
     uvicorn.run(app, host=host, port=port)

@@ -39,6 +39,7 @@ huggingface_hub = "*"
 hf-transfer = "*"
 
 [pypi-dependencies]
+llama-cpp-python = "*"
 # OpenVINO integration - STABLE VERSIONS for Intel Arc A770 support  
 openvino = "~=2024.3.0"
 openvino-genai = "~=2024.3.0"
