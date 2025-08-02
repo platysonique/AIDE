@@ -6,15 +6,6 @@ import json
 import subprocess
 from typing import Dict, List, Any
 
-# Import the tool decorator - this will be injected by the tool service
-# from ..services.tool_service import tool
-
-def tool(name: str, desc: str = "", schema: dict = None):
-    """Placeholder tool decorator - will be replaced by proper import"""
-    def wrapper(fn):
-        return fn
-    return wrapper
-
 @tool("analyze_codebase", "Analyze the entire codebase structure and provide insights", {
     "path": {"type": "string", "description": "Path to analyze (defaults to current workspace)"}
 })
@@ -29,7 +20,7 @@ def analyze_codebase(path: str = "."):
         
         if not base_path.is_dir():
             return {"error": f"Path is not a directory: {path}"}
-        
+
         analysis = {
             "path": str(base_path.resolve()),
             "structure": {},
@@ -44,7 +35,7 @@ def analyze_codebase(path: str = "."):
             "dependencies": {},
             "insights": []
         }
-        
+
         # Analyze directory structure
         analysis["structure"] = _analyze_directory_structure(base_path)
         
@@ -62,9 +53,9 @@ def analyze_codebase(path: str = "."):
         
         # Generate insights
         analysis["insights"] = _generate_insights(analysis)
-        
+
         return analysis
-        
+
     except Exception as e:
         return {"error": f"Codebase analysis failed: {str(e)}"}
 
@@ -76,7 +67,7 @@ def _analyze_directory_structure(base_path: Path) -> Dict[str, Any]:
         "max_depth": 0,
         "common_patterns": []
     }
-    
+
     try:
         # Common directories to identify project type
         common_dirs = {
@@ -85,38 +76,37 @@ def _analyze_directory_structure(base_path: Path) -> Dict[str, Any]:
             "config", "scripts", "build", "dist", "public", "assets",
             "node_modules", ".git", ".vscode", "venv", "env"
         }
-        
+
         found_dirs = set()
         max_depth = 0
         total_dirs = 0
-        
+
         for root, dirs, files in os.walk(base_path):
             depth = str(Path(root)).count(os.sep) - str(base_path).count(os.sep)
             max_depth = max(max_depth, depth)
             total_dirs += len(dirs)
-            
+
             # Skip deep nested directories to avoid performance issues
             if depth > 5:
                 dirs[:] = []
                 continue
-            
+
             for dir_name in dirs:
                 if dir_name in common_dirs:
                     found_dirs.add(dir_name)
-                    
-                structure["directories"].append({
-                    "name": dir_name,
-                    "path": str(Path(root) / dir_name),
-                    "depth": depth + 1
-                })
-        
+                    structure["directories"].append({
+                        "name": dir_name,
+                        "path": str(Path(root) / dir_name),
+                        "depth": depth + 1
+                    })
+
         structure["total_dirs"] = total_dirs
         structure["max_depth"] = max_depth
         structure["common_patterns"] = list(found_dirs)
-        
+
     except Exception as e:
         structure["error"] = str(e)
-    
+
     return structure
 
 def _analyze_files(base_path: Path) -> Dict[str, Any]:
@@ -128,7 +118,7 @@ def _analyze_files(base_path: Path) -> Dict[str, Any]:
         "recent": [],
         "total_size": 0
     }
-    
+
     try:
         all_files = []
         
@@ -149,32 +139,32 @@ def _analyze_files(base_path: Path) -> Dict[str, Any]:
                         "modified": stat.st_mtime,
                         "extension": ext
                     }
-                    
+
                     all_files.append(file_info)
                     files_info["total"] += 1
                     files_info["total_size"] += stat.st_size
-                    
+
                     # Track extensions
                     if ext:
                         files_info["by_extension"][ext] = files_info["by_extension"].get(ext, 0) + 1
-                    
+
                 except (OSError, PermissionError):
                     continue
-        
+
         # Sort by size (largest files)
         files_info["largest"] = sorted(all_files, key=lambda x: x["size"], reverse=True)[:10]
         
         # Sort by modification time (most recent)
         files_info["recent"] = sorted(all_files, key=lambda x: x["modified"], reverse=True)[:10]
-        
+
         # Clean up paths for privacy
         for file_list in [files_info["largest"], files_info["recent"]]:
             for file_info in file_list:
                 file_info["path"] = str(Path(file_info["path"]).relative_to(base_path))
-        
+
     except Exception as e:
         files_info["error"] = str(e)
-    
+
     return files_info
 
 def _detect_languages(base_path: Path) -> Dict[str, Any]:
@@ -184,7 +174,7 @@ def _detect_languages(base_path: Path) -> Dict[str, Any]:
         "primary": None,
         "config_files": []
     }
-    
+
     # Language detection based on extensions
     language_map = {
         ".py": "Python",
@@ -215,11 +205,11 @@ def _detect_languages(base_path: Path) -> Dict[str, Any]:
         ".xml": "XML",
         ".md": "Markdown"
     }
-    
+
     config_files = {
         "package.json": "Node.js/npm",
-        "requirements.txt": "Python pip",
-        "Pipfile": "Python pipenv", 
+        "requirements.txt": "Python pip", 
+        "Pipfile": "Python pipenv",
         "pyproject.toml": "Python Poetry",
         "Cargo.toml": "Rust",
         "go.mod": "Go modules",
@@ -228,7 +218,7 @@ def _detect_languages(base_path: Path) -> Dict[str, Any]:
         "composer.json": "PHP Composer",
         "Gemfile": "Ruby Bundler"
     }
-    
+
     try:
         # Count files by language
         for root, dirs, files in os.walk(base_path):
@@ -239,7 +229,7 @@ def _detect_languages(base_path: Path) -> Dict[str, Any]:
                 if ext in language_map:
                     lang = language_map[ext]
                     languages["detected"][lang] = languages["detected"].get(lang, 0) + 1
-                
+
                 # Check for config files
                 if file in config_files:
                     languages["config_files"].append({
@@ -247,15 +237,15 @@ def _detect_languages(base_path: Path) -> Dict[str, Any]:
                         "type": config_files[file],
                         "path": str(Path(root) / file)
                     })
-        
+
         # Determine primary language
         if languages["detected"]:
             primary = max(languages["detected"], key=languages["detected"].get)
             languages["primary"] = primary
-        
+
     except Exception as e:
         languages["error"] = str(e)
-    
+
     return languages
 
 def _analyze_git_repo(base_path: Path) -> Dict[str, Any]:
@@ -267,12 +257,12 @@ def _analyze_git_repo(base_path: Path) -> Dict[str, Any]:
         "contributors": [],
         "status": {}
     }
-    
+
     try:
         git_dir = base_path / ".git"
         if git_dir.exists():
             git_info["is_repo"] = True
-            
+
             # Get current branch
             try:
                 result = subprocess.run(
@@ -286,7 +276,7 @@ def _analyze_git_repo(base_path: Path) -> Dict[str, Any]:
                     git_info["branch"] = result.stdout.strip()
             except:
                 pass
-            
+
             # Get commit count
             try:
                 result = subprocess.run(
@@ -300,7 +290,7 @@ def _analyze_git_repo(base_path: Path) -> Dict[str, Any]:
                     git_info["commits"] = int(result.stdout.strip())
             except:
                 pass
-            
+
             # Get contributors
             try:
                 result = subprocess.run(
@@ -323,10 +313,10 @@ def _analyze_git_repo(base_path: Path) -> Dict[str, Any]:
                     git_info["contributors"] = contributors
             except:
                 pass
-    
+
     except Exception as e:
         git_info["error"] = str(e)
-    
+
     return git_info
 
 def _analyze_dependencies(base_path: Path) -> Dict[str, Any]:
@@ -337,7 +327,7 @@ def _analyze_dependencies(base_path: Path) -> Dict[str, Any]:
         "dev_dependencies": {},
         "total_deps": 0
     }
-    
+
     try:
         # Check package.json
         package_json = base_path / "package.json"
@@ -352,7 +342,7 @@ def _analyze_dependencies(base_path: Path) -> Dict[str, Any]:
                     deps["total_deps"] += len(data.get("devDependencies", {}))
             except:
                 pass
-        
+
         # Check requirements.txt
         requirements = base_path / "requirements.txt"
         if requirements.exists():
@@ -369,32 +359,42 @@ def _analyze_dependencies(base_path: Path) -> Dict[str, Any]:
                     deps["total_deps"] += len(pip_deps)
             except:
                 pass
-        
+
         # Check Cargo.toml
         cargo_toml = base_path / "Cargo.toml"
         if cargo_toml.exists():
             deps["package_managers"].append("cargo")
-        
+
         # Check go.mod
         go_mod = base_path / "go.mod"
         if go_mod.exists():
             deps["package_managers"].append("go modules")
-    
+
+        # Check pyproject.toml (Python Poetry)
+        pyproject_toml = base_path / "pyproject.toml"
+        if pyproject_toml.exists():
+            deps["package_managers"].append("poetry")
+
+        # Check pixi.toml (Your current setup!)
+        pixi_toml = base_path / "pixi.toml"
+        if pixi_toml.exists():
+            deps["package_managers"].append("pixi")
+
     except Exception as e:
         deps["error"] = str(e)
-    
+
     return deps
 
 def _generate_insights(analysis: Dict[str, Any]) -> List[str]:
     """Generate insights based on analysis"""
     insights = []
-    
+
     try:
         # Project type insights
         languages = analysis.get("languages", {})
         if languages.get("primary"):
             insights.append(f"Primary language: {languages['primary']}")
-        
+
         # Structure insights
         structure = analysis.get("structure", {})
         common_patterns = structure.get("common_patterns", [])
@@ -405,20 +405,20 @@ def _generate_insights(analysis: Dict[str, Any]) -> List[str]:
             insights.append("Project includes test directory")
         if "docs" in common_patterns:
             insights.append("Project includes documentation")
-        
+
         # Size insights
         files = analysis.get("files", {})
         total_files = files.get("total", 0)
         total_size = files.get("total_size", 0)
-        
+
         if total_files > 1000:
             insights.append("Large codebase with 1000+ files")
         elif total_files < 10:
             insights.append("Small project with few files")
-        
+
         if total_size > 10 * 1024 * 1024:  # 10MB
             insights.append("Large project (>10MB)")
-        
+
         # Git insights
         git_info = analysis.get("git_info", {})
         if git_info.get("is_repo"):
@@ -427,19 +427,29 @@ def _generate_insights(analysis: Dict[str, Any]) -> List[str]:
                 insights.append(f"Active repository with {commits} commits")
             elif commits > 0:
                 insights.append(f"Git repository with {commits} commits")
-        
+
         # Dependency insights
         deps = analysis.get("dependencies", {})
         total_deps = deps.get("total_deps", 0)
+        package_managers = deps.get("package_managers", [])
+        
         if total_deps > 50:
             insights.append(f"Heavy dependency usage ({total_deps} packages)")
         elif total_deps > 0:
             insights.append(f"Uses {total_deps} external packages")
+
+        if "pixi" in package_managers:
+            insights.append("Uses Pixi for dependency management (modern Python)")
+
+        # Language-specific insights
+        detected_langs = languages.get("detected", {})
+        if "Python" in detected_langs and "TypeScript" in detected_langs:
+            insights.append("Full-stack project with Python backend and TypeScript frontend")
         
         if not insights:
             insights.append("Basic project structure detected")
-    
+
     except Exception as e:
         insights.append(f"Insight generation error: {str(e)}")
-    
+
     return insights
