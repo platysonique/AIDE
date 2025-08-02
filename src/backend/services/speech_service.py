@@ -28,35 +28,40 @@ except ImportError:
 
 class SpeechService:
     """Speech-to-text and text-to-speech service"""
-    
+
     def __init__(self):
         self.speech_config = config.get_speech_config()
         self.stt_available = self._check_whisper()
         self.tts_available = self._check_tts()
-        
+
         # Initialize models/engines
         self.whisper_model = None
         self.tts_engine = None
-        
+
         if self.stt_available:
             self._init_whisper()
-        
+
         if self.tts_available:
             self._init_tts()
-    
+
     def _check_whisper(self) -> bool:
         """Check if Whisper is available"""
         return WHISPER_AVAILABLE
-    
+
     def _check_tts(self) -> bool:
         """Check if TTS is available"""
         return PYTTSX3_AVAILABLE
-    
+
     def _init_whisper(self):
         """Initialize Whisper model for speech-to-text"""
+        # FIXED: Check if already initialized
+        if self.whisper_model is not None:
+            logger.info("⚡ Whisper already initialized - skipping")
+            return
+            
         if not WHISPER_AVAILABLE:
             return
-        
+
         try:
             model_name = self.speech_config.get("stt_model", "base")
             logger.info(f"Loading Whisper model: {model_name}")
@@ -65,19 +70,24 @@ class SpeechService:
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             self.stt_available = False
-    
+
     def _init_tts(self):
         """Initialize TTS engine"""
+        # FIXED: Check if already initialized
+        if self.tts_engine is not None:
+            logger.info("⚡ TTS already initialized - skipping")
+            return
+            
         if not PYTTSX3_AVAILABLE:
             return
-        
+
         try:
             self.tts_engine = pyttsx3.init()
-            
+
             # Configure TTS engine
             rate = self.tts_engine.getProperty('rate')
             self.tts_engine.setProperty('rate', rate - 50)  # Slightly slower
-            
+
             voices = self.tts_engine.getProperty('voices')
             if voices:
                 # Try to use a good quality voice
@@ -85,12 +95,12 @@ class SpeechService:
                     if 'english' in voice.name.lower() or 'en' in voice.id.lower():
                         self.tts_engine.setProperty('voice', voice.id)
                         break
-            
+
             logger.info("✅ TTS engine initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize TTS engine: {e}")
             self.tts_available = False
-    
+
     async def speech_to_text(self, audio_data: bytes, format: str = "wav") -> Dict[str, Any]:
         """Convert speech to text using Whisper"""
         if not self.stt_available or not self.whisper_model:
@@ -99,26 +109,26 @@ class SpeechService:
                 "error": "Speech-to-text not available",
                 "text": ""
             }
-        
+
         try:
             # Save audio to temporary file
             with tempfile.NamedTemporaryFile(suffix=f".{format}", delete=False) as f:
                 f.write(audio_data)
                 temp_path = f.name
-            
+
             logger.debug(f"Processing audio file: {temp_path}")
-            
+
             # Transcribe with Whisper
             result = self.whisper_model.transcribe(temp_path)
-            
+
             # Cleanup
             Path(temp_path).unlink(missing_ok=True)
-            
+
             text = result["text"].strip()
             confidence = result.get("avg_logprob", 0.0)
-            
+
             logger.info(f"🎙️ STT result: {text[:50]}... (confidence: {confidence:.2f})")
-            
+
             return {
                 "success": True,
                 "text": text,
@@ -126,7 +136,7 @@ class SpeechService:
                 "language": result.get("language", "unknown"),
                 "duration": result.get("duration", 0.0)
             }
-            
+
         except Exception as e:
             logger.error(f"Speech-to-text failed: {e}")
             return {
@@ -134,7 +144,7 @@ class SpeechService:
                 "error": str(e),
                 "text": ""
             }
-    
+
     async def speech_to_text_from_base64(self, audio_base64: str, format: str = "wav") -> Dict[str, Any]:
         """Convert base64 encoded audio to text"""
         try:
@@ -148,7 +158,7 @@ class SpeechService:
                 "error": f"Audio decoding failed: {str(e)}",
                 "text": ""
             }
-    
+
     async def text_to_speech(self, text: str, output_path: Optional[str] = None) -> Dict[str, Any]:
         """Convert text to speech"""
         if not self.tts_available or not self.tts_engine:
@@ -157,31 +167,32 @@ class SpeechService:
                 "error": "Text-to-speech not available",
                 "audio_path": None
             }
-        
+
         try:
             logger.debug(f"Converting text to speech: {text[:50]}...")
-            
+
             if output_path:
                 # Save to file
                 self.tts_engine.save_to_file(text, output_path)
                 self.tts_engine.runAndWait()
-                
+
                 return {
                     "success": True,
                     "audio_path": output_path,
                     "message": "Speech saved to file"
                 }
+
             else:
                 # Play directly
                 self.tts_engine.say(text)
                 self.tts_engine.runAndWait()
-                
+
                 return {
                     "success": True,
                     "audio_path": None,
                     "message": "Speech played successfully"
                 }
-                
+
         except Exception as e:
             logger.error(f"Text-to-speech failed: {e}")
             return {
@@ -189,35 +200,34 @@ class SpeechService:
                 "error": str(e),
                 "audio_path": None
             }
-    
+
     async def text_to_speech_base64(self, text: str) -> Dict[str, Any]:
         """Convert text to speech and return as base64"""
         try:
             # Create temporary file for audio
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 temp_path = f.name
-            
+
             # Generate speech to file
             result = await self.text_to_speech(text, temp_path)
-            
+
             if not result["success"]:
                 return result
-            
+
             # Read file and encode as base64
             with open(temp_path, "rb") as f:
                 audio_data = f.read()
-            
-            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
-            
+                audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+
             # Cleanup
             Path(temp_path).unlink(missing_ok=True)
-            
+
             return {
                 "success": True,
                 "audio_base64": audio_base64,
                 "message": "Speech generated successfully"
             }
-            
+
         except Exception as e:
             logger.error(f"Text-to-speech base64 failed: {e}")
             return {
@@ -225,7 +235,7 @@ class SpeechService:
                 "error": str(e),
                 "audio_base64": None
             }
-    
+
     def get_speech_capabilities(self) -> Dict[str, Any]:
         """Get available speech capabilities"""
         return {
@@ -236,14 +246,14 @@ class SpeechService:
             "supported_formats": ["wav", "mp3", "m4a"] if self.stt_available else [],
             "whisper_model": self.speech_config.get("stt_model", "base") if self.stt_available else None
         }
-    
+
     async def test_speech_functionality(self) -> Dict[str, Any]:
         """Test speech functionality"""
         results = {
             "stt_test": {"success": False, "message": "Not tested"},
             "tts_test": {"success": False, "message": "Not tested"}
         }
-        
+
         # Test TTS
         if self.tts_available:
             try:
@@ -253,13 +263,13 @@ class SpeechService:
                 results["tts_test"] = {"success": False, "message": str(e)}
         else:
             results["tts_test"] = {"success": False, "message": "TTS not available"}
-        
+
         # Note: STT test would require actual audio input, so we just check availability
         results["stt_test"] = {
             "success": self.stt_available,
             "message": "Whisper model loaded" if self.stt_available else "Whisper not available"
         }
-        
+
         return results
 
 # Global speech service instance

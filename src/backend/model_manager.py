@@ -10,12 +10,19 @@ import traceback
 
 # ENHANCED: OpenVINO backend import with graceful fallback
 try:
-    from openvino_backend import AIDE_OpenVINO_Backend, OpenVINOModelWrapper, OpenVINOTokenizerWrapper, create_openvino_backend
-    AIDE_OPENVINO_AVAILABLE = True
-    print("✅ AIDE OpenVINO backend available - Intel Arc A770 BEAST MODE ready!")
+    # Check if the openvino_backend module actually exists
+    import importlib.util
+    openvino_spec = importlib.util.find_spec("openvino_backend")
+    if openvino_spec is not None:
+        from openvino_backend import AIDE_OpenVINO_Backend, OpenVINOModelWrapper, OpenVINOTokenizerWrapper, create_openvino_backend
+        AIDE_OPENVINO_AVAILABLE = True
+        print("✅ AIDE OpenVINO backend available - Intel Arc A770 BEAST MODE ready!")
+    else:
+        raise ImportError("openvino_backend module not found")
 except ImportError as e:
     AIDE_OPENVINO_AVAILABLE = False
     print(f"⚠️ AIDE OpenVINO backend not available: {e}")
+    print("💡 This is normal - OpenVINO backend appears to be a custom module not yet implemented")
 
 # Path to models directory (fixed path resolution)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # Go up to repo root
@@ -88,7 +95,7 @@ def _detect_optimal_device() -> Dict[str, Any]:
                     device_name = backend_info.get("device_name", "Unknown GPU")
                     print(f"🎮 Using OpenVINO GPU fallback: {device_name}")
                     return {
-                        "device_map": "openvino_gpu", 
+                        "device_map": "openvino_gpu",
                         "device_name": f"GPU (OpenVINO) - {device_name}",
                         "backend": "openvino",
                         "use_openvino": True,
@@ -97,6 +104,7 @@ def _detect_optimal_device() -> Dict[str, Any]:
                         "memory_strategy": "GPU-accelerated via OpenVINO",
                         "model_kwargs": {}
                     }
+                    
         except Exception as e:
             print(f"⚠️ AIDE OpenVINO detection failed: {e}")
             traceback.print_exc()
@@ -145,7 +153,7 @@ def _detect_optimal_device() -> Dict[str, Any]:
     return {
         "device_map": "cpu",
         "device_name": "CPU (94GB RAM BEAST MODE)",
-        "backend": "pytorch_cpu", 
+        "backend": "pytorch_cpu",
         "use_openvino": False,
         "use_intel_xpu": False,
         "memory_strategy": "High-RAM CPU optimized for your 94GB setup",
@@ -182,7 +190,7 @@ def _apply_intel_arc_optimizations(model) -> Any:
                 continue
         
         return model
-    
+        
     except Exception as e:
         print(f"⚠️ Intel Arc optimization failed: {e}")
         print("📝 Make sure intel_extension_for_pytorch is properly installed")
@@ -218,6 +226,7 @@ def load_model(model_name: str) -> Tuple[Any, Any]:
                 
                 if success:
                     print(f"✅ OpenVINO model loaded successfully: {message}")
+                    
                     # Create compatibility wrappers for existing AIDE architecture
                     tokenizer = OpenVINOTokenizerWrapper(openvino_backend)
                     model = OpenVINOModelWrapper(openvino_backend)
@@ -229,6 +238,7 @@ def load_model(model_name: str) -> Tuple[Any, Any]:
                     return tokenizer, model
                 else:
                     print(f"⚠️ OpenVINO failed: {message}, falling back to PyTorch")
+                    
             except Exception as e:
                 print(f"❌ OpenVINO loading failed: {e}")
                 traceback.print_exc()
@@ -276,7 +286,7 @@ def load_model(model_name: str) -> Tuple[Any, Any]:
         print(f"🎯 Tokenizer type: {tokenizer.__class__.__name__}")
         
         return tokenizer, model
-    
+        
     except Exception as e:
         print(f"❌ Failed to load model '{model_name}': {e}")
         print(f"💡 Troubleshooting tip: Check if intel_extension_for_pytorch is installed")
@@ -302,7 +312,7 @@ def _analyze_model_config(model_path: Path) -> Dict[str, Any]:
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
-            
+                
             hints.update({
                 "model_type": config.get("model_type", ""),
                 "tokenizer_class": config.get("tokenizer_class", ""),
@@ -586,6 +596,7 @@ def discover_and_validate_models() -> Dict[str, Any]:
     ENHANCED with comprehensive acceleration analysis
     """
     models = list_available_models()
+    
     summary = {
         "total_models": len(models),
         "valid_models": [],
@@ -622,7 +633,6 @@ def discover_and_validate_models() -> Dict[str, Any]:
         
         if validation["is_valid"]:
             info = get_model_info(model_name)
-            
             model_summary = {
                 "name": model_name,
                 "size_gb": info["size_gb"] if info else 0,
@@ -649,7 +659,6 @@ def discover_and_validate_models() -> Dict[str, Any]:
                 summary["acceleration_ready"].append(model_name)
             
             summary["valid_models"].append(model_summary)
-        
         else:
             summary["invalid_models"].append({
                 "name": model_name,
@@ -694,7 +703,7 @@ def check_intel_arc_status() -> Dict[str, Any]:
     else:
         status["recommendations"].append("Install OpenVINO: pip install openvino openvino-genai")
     
-    # Check PyTorch XPU (Priority 2)  
+    # Check PyTorch XPU (Priority 2)
     try:
         import torch
         import intel_extension_for_pytorch as ipex
@@ -723,6 +732,7 @@ def check_intel_arc_status() -> Dict[str, Any]:
                         })
                     except:
                         device_info.append({"device_id": i, "name": "Intel XPU Device", "total_memory": "Unknown"})
+                
                 status["devices"] = device_info
             else:
                 status["recommendations"].append("Intel XPU not detected - check Intel Arc drivers")
@@ -735,6 +745,7 @@ def check_intel_arc_status() -> Dict[str, Any]:
         status["recommendations"].append(f"Intel Arc detection error: {e}")
     
     # Add other acceleration options
+    import torch
     if torch.cuda.is_available():
         status["acceleration_priority"].append("CUDA GPU")
     
@@ -758,8 +769,8 @@ if __name__ == "__main__":
     print(f"  Intel Extension available: {'✅' if arc_status['intel_extension_available'] else '❌'}")
     print(f"  XPU available: {'✅' if arc_status['xpu_available'] else '❌'}")
     print(f"  Device count: {arc_status['device_count']}")
-    
     print(f"  🚀 Acceleration Priority Order:")
+    
     for i, accel in enumerate(arc_status['acceleration_priority'], 1):
         print(f"    {i}. {accel}")
     
@@ -822,22 +833,23 @@ if __name__ == "__main__":
         for model in summary['valid_models']:
             # Priority indicators
             if model['openvino_ready']:
-                accel_indicator = "🚀🎮"  # OpenVINO + Arc = Ultimate  
+                accel_indicator = "🚀🎮"  # OpenVINO + Arc = Ultimate
             elif model['intel_arc_ready']:
-                accel_indicator = "🎮"    # Arc ready
+                accel_indicator = "🎮"  # Arc ready
             else:
-                accel_indicator = "💻"    # CPU only
-                
+                accel_indicator = "💻"  # CPU only
+            
             print(f"  {accel_indicator} {model['name']} ({model['size_gb']} GB, {model['architecture']}, {model['tokenizer_type']})")
+            
             if model.get('acceleration_options'):
-                print(f"      Options: {', '.join(model['acceleration_options'])}")
+                print(f"    Options: {', '.join(model['acceleration_options'])}")
     
     if summary['openvino_ready']:
         print(f"\n🚀 BEAST MODE: Models optimized for OpenVINO + Intel Arc A770:")
         for model_name in summary['openvino_ready']:
-            print(f"    - {model_name}")
+            print(f"  - {model_name}")
     
     if summary['intel_arc_ready']:
         print(f"\n🎮 Models ready for Intel Arc A770 acceleration:")
         for model_name in summary['intel_arc_ready']:
-            print(f"    - {model_name}")
+            print(f"  - {model_name}")
