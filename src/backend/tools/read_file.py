@@ -1,7 +1,7 @@
 # File: src/backend/tools/read_file.py
-from pathlib import Path
-from backend.api import tool
 
+from pathlib import Path
+from ..api import tool  # 🔥 THE FIX: Changed from 'backend.api' to '..api'
 
 @tool("read_file", "Read any file in the workspace", {"path": "string"})
 def read_file(path: str):
@@ -20,7 +20,7 @@ def read_file(path: str):
         
         if not resolved_path.exists():
             return {"error": f"File not found: {path}"}
-            
+        
         if not resolved_path.is_file():
             return {"error": f"Path is not a file: {path}"}
         
@@ -31,6 +31,6 @@ def read_file(path: str):
             "size": len(content),
             "lines": len(content.split('\n'))
         }
-        
+    
     except Exception as e:
         return {"error": f"Failed to read {path}: {str(e)}"}

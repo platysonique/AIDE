@@ -28,9 +28,12 @@ fastapi = "*"
 uvicorn = "*"
 websockets = "*"
 pydantic = "*"
-PyYAML = "*"
+pyyaml = "*"
 huggingface_hub = "*"
 hf-transfer = "*"
+pyarrow = "<15.0.0"
+sentence-transformers = ">=2.0.0"
+datasets = ">=2.0.0"
 
 [pypi-dependencies]
 llama-cpp-python = "*"
@@ -54,10 +57,24 @@ setup-models = "mkdir -p models"
 download-deepseek = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download huihui-ai/DeepSeek-R1-Distill-Qwen-7B-abliterated --local-dir ./models/deepseek"
 download-pixtral = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download mistralai/Pixtral-12B-2409 --local-dir ./models/pixtral"
 download-both = "pixi run download-deepseek && pixi run download-pixtral"
+
+# GPU-FIRST hardware validation
 test-xpu = "python -c \"import torch; import intel_extension_for_pytorch as ipex; print(f'PyTorch: {torch.__version__}'); print(f'IPEX: {ipex.__version__}'); print(f'XPU available: {torch.xpu.is_available()}'); print(f'Device count: {torch.xpu.device_count() if torch.xpu.is_available() else 0}')\""
 test-openvino-gpu = "python -c \"import openvino as ov; core = ov.Core(); devices = core.available_devices; print('Available devices:', devices); gpu_devices = [d for d in devices if 'GPU' in d]; print('GPU devices:', gpu_devices); print('Arc A770 ready!' if gpu_devices else 'GPU not detected')\""
 test-openvino-genai = "python -c \"from openvino_genai import LLMPipeline; print('✅ OpenVINO GenAI available')\""
+test-sycl = "sycl-ls"
+test-opencl = "clinfo | grep -i intel"
+
 validate-intel-stack = "pixi run test-xpu && pixi run test-openvino-gpu && pixi run test-openvino-genai"
-validate-all = "pixi run validate-intel-stack && echo '🎮 Intel Arc A770 stack validation complete!'"
-start-backend = "python src/backend/main.py"
+validate-gpu-first = "pixi run test-sycl && pixi run test-opencl && pixi run validate-intel-stack"
+validate-all = "pixi run validate-gpu-first && echo '🎮 Intel Arc A770 GPU-FIRST validation complete!'"
+
+# GPU-FIRST backend startup options
+start-backend = "python src/backend/main.py --gpu-first"
+start-backend-fast = "python src/backend/main.py --gpu-first --no-model-preload"
+start-backend-force-gpu = "python src/backend/main.py --gpu-first --force-gpu"
+start-backend-max-gpu = "python src/backend/main.py --gpu-first --gpu-layers -1"
+start-backend-cpu-fallback = "python src/backend/main.py"
+
 test-backend = "python -c \"import requests; print('Backend test:', requests.get('http://127.0.0.1:8000/health').json())\""
+test-gpu-backend = "python -c \"import requests; print('GPU Backend test:', requests.get('http://127.0.0.1:8000/health/gpu').json())\""

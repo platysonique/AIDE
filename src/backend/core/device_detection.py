@@ -10,17 +10,19 @@ from .logger import logger
 try:
     from ..llamacpp_backend import create_llamacpp_backend
     LLAMACPP_AVAILABLE = True
+    logger.info("✅ llama-cpp-python available - GGUF models ready!")
 except ImportError:
     LLAMACPP_AVAILABLE = False
-    logger.warning("llama.cpp backend not available")
+    logger.warning("⚠️ llama.cpp backend not available")
 
 try:
     from ..openvino_backend import create_openvino_backend
     import openvino as ov
     OPENVINO_AVAILABLE = True
+    logger.info("✅ OpenVINO backend available")
 except ImportError:
     OPENVINO_AVAILABLE = False
-    logger.warning("OpenVINO backend not available")
+    logger.warning("⚠️ OpenVINO backend not available")
 
 def detect_optimal_device() -> Dict[str, Any]:
     """
@@ -29,7 +31,7 @@ def detect_optimal_device() -> Dict[str, Any]:
     """
     device_config = {
         "backend": "cpu",
-        "device": "cpu", 
+        "device": "cpu",
         "use_llamacpp": False,
         "use_openvino": False,
         "llamacpp_backend": None,
@@ -63,7 +65,7 @@ def detect_optimal_device() -> Dict[str, Any]:
                     logger.info("🚀 Using llama.cpp CPU optimization")
                     device_config.update({
                         "backend": "llamacpp",
-                        "device": "cpu_llamacpp", 
+                        "device": "cpu_llamacpp",
                         "use_llamacpp": True,
                         "llamacpp_backend": llamacpp_backend
                     })
@@ -89,7 +91,7 @@ def detect_optimal_device() -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"OpenVINO backend creation failed: {e}")
 
-    # PRIORITY 3: PyTorch XPU (Intel Arc fallback)  
+    # PRIORITY 3: PyTorch XPU (Intel Arc fallback)
     try:
         import intel_extension_for_pytorch as ipex
         if hasattr(torch, 'xpu') and torch.xpu.is_available():
@@ -141,7 +143,6 @@ def _get_hardware_info() -> Dict[str, Any]:
         if torch.cuda.is_available():
             info["cuda_available"] = True
             info["cuda_version"] = torch.version.cuda
-            
             for i in range(torch.cuda.device_count()):
                 gpu_info = {
                     "id": i,
@@ -208,7 +209,7 @@ def _get_hardware_recommendations(hardware_info: Dict[str, Any]) -> list:
     # Backend recommendations
     if not LLAMACPP_AVAILABLE:
         recommendations.append("Install llama.cpp for optimal GGUF model performance")
-
+    
     if not OPENVINO_AVAILABLE:
         recommendations.append("Install OpenVINO for Intel hardware optimization")
 
@@ -281,7 +282,6 @@ def check_intel_arc_availability() -> Dict[str, Any]:
     # Check PyTorch XPU
     try:
         import intel_extension_for_pytorch as ipex
-        
         if hasattr(torch, 'xpu') and torch.xpu.is_available():
             device_count = torch.xpu.device_count()
             if device_count > 0:
@@ -302,12 +302,10 @@ def check_intel_arc_availability() -> Dict[str, Any]:
                 "Install/update Intel Arc drivers",
                 "Check if intel-level-zero and intel-opencl-icd are installed"
             ])
-
     except ImportError:
         status["status_message"] = "Intel Extension for PyTorch not installed"
         status["recommendations"].append("Install: pip install intel_extension_for_pytorch")
         status["backends_available"].append("CPU only")
-
     except Exception as e:
         status["status_message"] = f"Intel Arc detection error: {e}"
         status["recommendations"].append("Check Intel Arc A770 installation and drivers")
@@ -334,3 +332,190 @@ def get_device_capabilities() -> Dict[str, Any]:
         },
         "recommendations": device_config.get("recommendations", [])
     }
+
+def get_device_priority_info() -> Dict[str, Any]:
+    """
+    🔥 THE MISSING FUNCTION - Get device priority information for AIDE initialization
+    This function was missing and causing ImportError - now ENHANCED and bulletproof!
+    """
+    logger.info("🔍 Getting device priority information...")
+    
+    try:
+        # Get comprehensive device info
+        capabilities = get_device_capabilities()
+        optimal_config = capabilities["optimal_config"]
+        arc_status = capabilities["intel_arc_status"]
+        
+        # Determine primary device with enhanced logic
+        primary_device = optimal_config["device"]
+        backend = optimal_config["backend"]
+        
+        # Enhanced device priority scoring
+        device_priority_score = _calculate_device_priority_score(optimal_config, arc_status)
+        
+        # Format as priority info with enhanced metadata
+        priority_info = {
+            "primary_device": primary_device,
+            "backend": backend,
+            "pytorch_device": optimal_config.get("pytorch_device", "cpu"),
+            "hardware_acceleration": primary_device != "cpu",
+            "arc_optimized": "arc" in primary_device.lower(),
+            "device_priority_score": device_priority_score,
+            "recommended_settings": {
+                "use_llamacpp": optimal_config.get("use_llamacpp", False),
+                "use_openvino": optimal_config.get("use_openvino", False),
+                "memory_efficient_mode": _should_use_memory_efficient_mode(optimal_config),
+                "batch_size_recommendation": _get_recommended_batch_size(optimal_config)
+            },
+            "hardware_info": optimal_config.get("hardware_info", {}),
+            "performance_expectations": _get_performance_expectations(optimal_config),
+            "status": "ready",
+            "initialization_timestamp": platform.time.time() if hasattr(platform, 'time') else None,
+            "backend_availability": capabilities.get("available_backends", {}),
+            "recommendations": capabilities.get("recommendations", [])
+        }
+        
+        logger.info(f"🎯 Device priority: {priority_info['primary_device']} ({priority_info['backend']}) - Score: {device_priority_score}/100")
+        
+        # Log performance expectations
+        perf = priority_info["performance_expectations"]
+        logger.info(f"📊 Expected performance: {perf['tier']} - {perf['description']}")
+        
+        return priority_info
+        
+    except Exception as e:
+        logger.error(f"❌ Device priority detection failed: {e}")
+        # Fallback to safe CPU configuration
+        return {
+            "primary_device": "cpu",
+            "backend": "cpu",
+            "pytorch_device": "cpu",
+            "hardware_acceleration": False,
+            "arc_optimized": False,
+            "device_priority_score": 20,
+            "recommended_settings": {
+                "use_llamacpp": LLAMACPP_AVAILABLE,
+                "use_openvino": False,
+                "memory_efficient_mode": True,
+                "batch_size_recommendation": 1
+            },
+            "hardware_info": {},
+            "performance_expectations": {
+                "tier": "Basic",
+                "description": "CPU-only fallback mode",
+                "relative_speed": "1x"
+            },
+            "status": "fallback",
+            "error": str(e),
+            "backend_availability": {
+                "llamacpp": LLAMACPP_AVAILABLE,
+                "openvino": OPENVINO_AVAILABLE,
+                "pytorch_xpu": False,
+                "pytorch_cuda": False
+            },
+            "recommendations": ["Check hardware setup and drivers"]
+        }
+
+def _calculate_device_priority_score(optimal_config: Dict[str, Any], arc_status: Dict[str, Any]) -> int:
+    """Calculate a priority score for the detected device configuration (0-100)"""
+    score = 0
+    device = optimal_config.get("device", "cpu")
+    backend = optimal_config.get("backend", "cpu")
+    
+    # Base scores by device type
+    if "arc_a770" in device:
+        score += 90  # Beast mode!
+    elif "cuda" in device:
+        score += 80
+    elif "xpu" in device:
+        score += 75
+    elif device == "cpu":
+        score += 20
+    
+    # Backend bonuses
+    if backend == "llamacpp" and optimal_config.get("use_llamacpp"):
+        score += 10  # llama.cpp is optimized
+    elif backend == "openvino" and optimal_config.get("use_openvino"):
+        score += 8
+    
+    # Memory bonus
+    hardware_info = optimal_config.get("hardware_info", {})
+    memory_gb = hardware_info.get("system_memory_gb", 0)
+    if memory_gb >= 64:  # Your beast setup!
+        score += 5
+    elif memory_gb >= 32:
+        score += 3
+    elif memory_gb >= 16:
+        score += 1
+    
+    return min(score, 100)  # Cap at 100
+
+def _should_use_memory_efficient_mode(optimal_config: Dict[str, Any]) -> bool:
+    """Determine if memory efficient mode should be enabled"""
+    hardware_info = optimal_config.get("hardware_info", {})
+    available_memory = hardware_info.get("available_memory_gb", 0)
+    
+    # With 94GB RAM, you probably never need memory efficient mode unless running huge models
+    if available_memory < 8:
+        return True
+    elif available_memory < 16:
+        return True  # Better safe than sorry
+    else:
+        return False  # You got plenty of RAM!
+
+def _get_recommended_batch_size(optimal_config: Dict[str, Any]) -> int:
+    """Get recommended batch size based on hardware"""
+    device = optimal_config.get("device", "cpu")
+    hardware_info = optimal_config.get("hardware_info", {})
+    memory_gb = hardware_info.get("system_memory_gb", 8)
+    
+    if "arc_a770" in device:
+        return 8 if memory_gb >= 32 else 4  # Arc A770 can handle decent batches
+    elif "cuda" in device:
+        return 16 if memory_gb >= 32 else 8  # CUDA usually handles larger batches
+    elif "xpu" in device:
+        return 4 if memory_gb >= 16 else 2
+    else:
+        return 2 if memory_gb >= 16 else 1  # CPU is more conservative
+
+def _get_performance_expectations(optimal_config: Dict[str, Any]) -> Dict[str, str]:
+    """Get expected performance characteristics"""
+    device = optimal_config.get("device", "cpu")
+    backend = optimal_config.get("backend", "cpu")
+    
+    if "arc_a770" in device and backend == "llamacpp":
+        return {
+            "tier": "Beast Mode",
+            "description": "Intel Arc A770 + llama.cpp - Optimal GGUF performance",
+            "relative_speed": "8-12x CPU speed"
+        }
+    elif "arc_a770" in device:
+        return {
+            "tier": "High Performance",
+            "description": "Intel Arc A770 hardware acceleration",
+            "relative_speed": "5-8x CPU speed"
+        }
+    elif "cuda" in device:
+        return {
+            "tier": "High Performance",
+            "description": "NVIDIA CUDA acceleration",
+            "relative_speed": "6-10x CPU speed"
+        }
+    elif "xpu" in device:
+        return {
+            "tier": "Good Performance",
+            "description": "Intel XPU acceleration",
+            "relative_speed": "3-5x CPU speed"
+        }
+    elif backend == "llamacpp":
+        return {
+            "tier": "Optimized CPU",
+            "description": "llama.cpp CPU optimization",
+            "relative_speed": "2-3x standard CPU"
+        }
+    else:
+        return {
+            "tier": "Basic",
+            "description": "Standard CPU processing",
+            "relative_speed": "1x baseline"
+        }

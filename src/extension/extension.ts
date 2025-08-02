@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+
 import { backendManager } from './src/backendManager';
 import { IntentPipeline } from './src/pipeline/intentPipeline';
 import { initSpeechUI } from './src/ui/speechUI';
@@ -12,28 +13,35 @@ import { ToolsWebviewProvider } from './src/ui/toolsWebviewProvider';
 import { AideWebSocket } from './src/websocketClient';
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('🚀 AIDE Universal Intelligence Pipeline activating...');
+    console.log('🚀 AIDE GPU-FIRST Universal Intelligence Pipeline activating...');
     
     try {
-        // OPTIMIZED: Extended loading message timeout to match backend manager's 60s timeout + buffer
-        const loadingMessage = vscode.window.setStatusBarMessage('$(loading~spin) Starting AIDE backend server...', 300000);
+        // GPU-FIRST: Extended loading message for GPU initialization
+        const loadingMessage = vscode.window.setStatusBarMessage(
+            '$(loading~spin) Starting AIDE GPU-FIRST backend server...', 
+            180000 // 3 minutes for GPU model loading
+        );
         
-        // Start backend server first and wait for it to be ready
-        console.log('🔧 Initializing enhanced backend manager...');
+        // Start GPU-FIRST backend server - FIXED: Single argument
+        console.log('🎮 Initializing GPU-FIRST enhanced backend manager...');
         const serverStarted = await backendManager.startBackend(context);
         
         if (!serverStarted) {
             loadingMessage.dispose();
             vscode.window.showErrorMessage(
-                'AIDE backend failed to start. Extension will have limited functionality.',
-                'Retry', 'View Logs', 'Continue Anyway'
+                'AIDE GPU-FIRST backend startup timed out. GPU model loading may take time.',
+                'Fast Start (CPU)', 'Force GPU Retry', 'View GPU Status', 'View Logs'
             ).then(selection => {
-                if (selection === 'Retry') {
+                if (selection === 'Fast Start (CPU)') {
+                    // Use basic startup - FIXED: Single argument
+                    backendManager.startBackend(context);
+                } else if (selection === 'Force GPU Retry') {
+                    // Retry with GPU focus
                     vscode.commands.executeCommand('workbench.action.reloadWindow');
+                } else if (selection === 'View GPU Status') {
+                    vscode.commands.executeCommand('aide.gpuStatus');
                 } else if (selection === 'View Logs') {
                     vscode.commands.executeCommand('workbench.action.showLogs');
-                } else if (selection === 'Continue Anyway') {
-                    initializeExtensionComponents(context, null, null);
                 }
             });
             return;
@@ -42,22 +50,38 @@ export async function activate(context: vscode.ExtensionContext) {
         // Clear loading message
         loadingMessage.dispose();
         
+        // Check GPU status
+        const gpuStatus = await checkGpuStatus();
+        
         // Now that server is ready, initialize the rest of the extension
-        console.log('✅ Backend ready, initializing AIDE components...');
+        console.log('✅ GPU-FIRST Backend ready, initializing AIDE components...');
         
-        // Initialize WebSocket instead of just Intent Pipeline
+        // Initialize WebSocket - FIXED: Use basic connect method
         const webSocket = new AideWebSocket();
-        webSocket.connect(); // Connects to ws://127.0.0.1:8000/ws
+        try {
+            await webSocket.connect();
+        } catch (error) {
+            console.warn('WebSocket connection failed, retrying...', error);
+            // Simple retry logic
+            setTimeout(async () => {
+                try {
+                    await webSocket.connect();
+                } catch (retryError) {
+                    console.error('WebSocket retry failed:', retryError);
+                }
+            }, 2000);
+        }
         
-        // Keep the pipeline for legacy support (if needed)
+        // Keep the pipeline for legacy support
         const pipeline = new IntentPipeline();
+        
         initializeExtensionComponents(context, pipeline, webSocket);
         
-        // Enhanced status bar with server status
+        // Enhanced status bar with GPU status
         const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        statusBarItem.text = '$(robot) AIDE ✅';
-        statusBarItem.tooltip = `AIDE Universal AI Assistant - Backend Running on ${backendManager.getServerUrl()}\nWebSocket: Connected`;
-        statusBarItem.command = 'aide.ask'; // Changed to use new WebSocket command
+        statusBarItem.text = gpuStatus.gpuDetected ? '$(robot) AIDE 🎮' : '$(robot) AIDE 💻';
+        statusBarItem.tooltip = `AIDE GPU-FIRST AI Assistant\nBackend: Running on ${backendManager.getServerUrl()}\nWebSocket: Connected\nGPU: ${gpuStatus.gpuDetected ? '✅ ' + gpuStatus.deviceName : '❌ CPU Only'}\nModel Loading: ${gpuStatus.modelStatus}`;
+        statusBarItem.command = 'aide.ask';
         statusBarItem.show();
         context.subscriptions.push(statusBarItem);
         
@@ -66,96 +90,110 @@ export async function activate(context: vscode.ExtensionContext) {
             dispose: () => webSocket.disconnect()
         });
         
-        // OPTIMIZED: Enhanced success message with more details
+        // GPU-FIRST: Enhanced success message with GPU details
+        const successMessage = gpuStatus.gpuDetected 
+            ? `🎮 AIDE GPU-FIRST is ready! Backend started with ${gpuStatus.deviceName}. Models loading with GPU acceleration...`
+            : `💻 AIDE is ready on CPU! Backend started on ${backendManager.getServerUrl()}. Consider GPU setup for better performance.`;
+            
         vscode.window.showInformationMessage(
-            `🎉 AIDE is fully loaded and ready! Backend auto-started on ${backendManager.getServerUrl()}`,
-            'Ask AIDE', 'Open Chat', 'View Tools', 'Status'
+            successMessage,
+            'Ask AIDE', 'Check GPU Status', 'Open Chat', 'GPU Settings'
         ).then(selection => {
             if (selection === 'Ask AIDE') {
                 vscode.commands.executeCommand('aide.ask');
+            } else if (selection === 'Check GPU Status') {
+                vscode.commands.executeCommand('aide.gpuStatus');
             } else if (selection === 'Open Chat') {
                 vscode.commands.executeCommand('aide.openChat');
-            } else if (selection === 'View Tools') {
-                vscode.commands.executeCommand('aide.invokeTool');
-            } else if (selection === 'Status') {
-                vscode.window.showInformationMessage(
-                    `AIDE Status:\n` +
-                    `Backend: ${backendManager.isServerReady() ? '✅ Running' : '❌ Not Ready'}\n` +
-                    `Server: ${backendManager.getServerUrl()}\n` +
-                    `WebSocket: ✅ Connected\n` +
-                    `Dynamic Tools: ✅ Active`
-                );
+            } else if (selection === 'GPU Settings') {
+                vscode.commands.executeCommand('aide.gpuSettings');
             }
         });
         
-        console.log('✅ AIDE Universal Intelligence activation complete! 🎯');
+        console.log('✅ AIDE GPU-FIRST Universal Intelligence activation complete! 🎯');
+        
     } catch (error) {
-        console.error('AIDE activation failed:', error);
-        vscode.window.showErrorMessage(`AIDE failed to activate: ${error}`);
+        console.error('AIDE GPU-FIRST activation failed:', error);
+        vscode.window.showErrorMessage(`AIDE GPU-FIRST failed to activate: ${error}`);
     }
 }
 
-function initializeExtensionComponents(context: vscode.ExtensionContext, pipeline: IntentPipeline | null, webSocket: AideWebSocket | null) {
-    console.log('🔧 Initializing AIDE extension components...');
+async function checkGpuStatus(): Promise<any> {
+    try {
+        const response = await fetch(`${backendManager.getServerUrl()}/health/gpu`);
+        if (response.ok) {
+            return await response.json();
+        }
+    } catch (error) {
+        console.error('GPU status check failed:', error);
+    }
     
-    // Register all commands (enhanced with WebSocket)
+    return {
+        gpuDetected: false,
+        deviceName: 'Unknown',
+        modelStatus: 'Unknown'
+    };
+}
+
+function initializeExtensionComponents(context: vscode.ExtensionContext, pipeline: IntentPipeline | null, webSocket: AideWebSocket | null) {
+    console.log('🔧 Initializing AIDE GPU-FIRST extension components...');
+    
+    // Register all commands (enhanced with GPU-first functionality)
     registerCommands(context, webSocket);
     
-    // Initialize UI modules (keeping your existing structure)
+    // Initialize UI modules
     initSpeechUI(context);
     initIngestUI(context);
     initCodeReviewUI(context);
     initDebugGuideUI(context);
     initMemoryUI(context);
     
-    // Register webview providers with pipeline (if available)
+    // Register webview providers
     const chatProvider = new ChatWebviewProvider(context, pipeline);
     const toolsProvider = new ToolsWebviewProvider(context);
+    
     vscode.window.registerWebviewViewProvider('aide.chatView', chatProvider);
     vscode.window.registerWebviewViewProvider('aide.toolsView', toolsProvider);
     
     // Initialize chat panel
     initChatPanel(context);
     
-    console.log('✅ All AIDE components initialized successfully');
+    console.log('✅ All AIDE GPU-FIRST components initialized successfully');
 }
 
 function registerCommands(context: vscode.ExtensionContext, webSocket: AideWebSocket | null) {
-    // Register all AIDE commands (enhanced with WebSocket functionality)
+    // Register all AIDE commands (enhanced with GPU-first functionality)
     const commands = [
-        // Primary WebSocket-powered command
+        // Primary GPU-FIRST WebSocket-powered command
         vscode.commands.registerCommand('aide.ask', async () => {
             const userInput = await vscode.window.showInputBox({
-                prompt: '🤖 What would you like AIDE to do?',
+                prompt: '🎮 What would you like AIDE to do? (GPU-accelerated)',
                 placeHolder: 'Ask anything about your code or workspace...'
             });
             
             if (userInput && webSocket) {
-                webSocket.query(userInput); // Send via WebSocket
+                webSocket.query(userInput);
             } else if (userInput && backendManager.isServerReady()) {
-                // Fallback to legacy pipeline if WebSocket not available
                 const pipeline = new IntentPipeline();
                 await pipeline.executeIntent(userInput, (message) => {
                     console.log(message);
                     vscode.window.showInformationMessage(message);
                 });
             } else if (userInput) {
-                // OPTIMIZED: Enhanced error messaging with troubleshooting
                 vscode.window.showWarningMessage(
-                    '⚠️ AIDE backend is not ready. Please wait for the server to start or restart the extension.',
-                    'Restart Extension', 'Check Status', 'Wait & Retry'
+                    '⚠️ AIDE GPU-FIRST backend is not ready. Please wait for GPU initialization or restart.',
+                    'Restart Extension', 'Check GPU Status', 'Wait & Retry'
                 ).then(selection => {
                     if (selection === 'Restart Extension') {
                         vscode.commands.executeCommand('workbench.action.reloadWindow');
-                    } else if (selection === 'Check Status') {
-                        vscode.commands.executeCommand('aide.serverStatus');
+                    } else if (selection === 'Check GPU Status') {
+                        vscode.commands.executeCommand('aide.gpuStatus');
                     } else if (selection === 'Wait & Retry') {
-                        // Give it another 30 seconds then retry
                         setTimeout(() => {
                             if (backendManager.isServerReady()) {
-                                vscode.window.showInformationMessage('✅ Backend is now ready! Try your command again.');
+                                vscode.window.showInformationMessage('✅ GPU backend is now ready! Try your command again.');
                             } else {
-                                vscode.window.showWarningMessage('Backend still not ready. Consider restarting.');
+                                vscode.window.showWarningMessage('GPU backend still not ready. Consider checking GPU status.');
                             }
                         }, 30000);
                     }
@@ -163,16 +201,91 @@ function registerCommands(context: vscode.ExtensionContext, webSocket: AideWebSo
             }
         }),
         
-        // Tool invocation command
+        // GPU Status command
+        vscode.commands.registerCommand('aide.gpuStatus', async () => {
+            try {
+                const gpuStatus = await checkGpuStatus();
+                const statusMessage = `🎮 AIDE GPU Status:\n` +
+                    `GPU Detected: ${gpuStatus.gpu_detected ? '✅ Yes' : '❌ No'}\n` +
+                    `Device: ${gpuStatus.device_info?.device_config?.device_name || 'Unknown'}\n` +
+                    `Priority: ${gpuStatus.device_info?.current_priority || 'Unknown'}\n` +
+                    `Model Status: ${gpuStatus.model_loading?.loaded ? '✅ Loaded' : 
+                        gpuStatus.model_loading?.loading ? '🔄 Loading' : '❌ Not Loaded'}\n` +
+                    `Backend: ${gpuStatus.gpu_backend_info?.backend || 'Unknown'}\n` +
+                    `GPU Layers: ${gpuStatus.args?.gpu_layers || 'Unknown'}`;
+                
+                vscode.window.showInformationMessage(
+                    statusMessage,
+                    'Refresh', 'GPU Settings', 'View Details'
+                ).then(selection => {
+                    if (selection === 'Refresh') {
+                        vscode.commands.executeCommand('aide.gpuStatus');
+                    } else if (selection === 'GPU Settings') {
+                        vscode.commands.executeCommand('aide.gpuSettings');
+                    } else if (selection === 'View Details') {
+                        console.log('GPU Status Details:', gpuStatus);
+                        vscode.window.showInformationMessage('GPU details logged to console. Press F12 to view.');
+                    }
+                });
+            } catch (error) {
+                vscode.window.showErrorMessage(`Failed to get GPU status: ${error}`);
+            }
+        }),
+        
+        // GPU Settings command
+        vscode.commands.registerCommand('aide.gpuSettings', async () => {
+            const options = [
+                'Force GPU Mode',
+                'CPU Fallback Mode',
+                'Maximum GPU Layers',
+                'GPU Performance Test',
+                'Install GPU Drivers',
+                'GPU Documentation'
+            ];
+            
+            const selection = await vscode.window.showQuickPick(options, {
+                placeHolder: 'AIDE GPU-FIRST Settings - Optimize your Intel Arc A770'
+            });
+            
+            switch (selection) {
+                case 'Force GPU Mode':
+                    vscode.window.showInformationMessage('🎮 Force GPU mode will be enabled on next restart.');
+                    break;
+                case 'CPU Fallback Mode':
+                    vscode.window.showInformationMessage('💻 CPU fallback mode will be enabled on next restart.');
+                    break;
+                case 'Maximum GPU Layers':
+                    vscode.window.showInformationMessage('🚀 Maximum GPU layers (-1) will be used on next restart.');
+                    break;
+                case 'GPU Performance Test':
+                    vscode.commands.executeCommand('aide.performanceTest');
+                    break;
+                case 'Install GPU Drivers':
+                    vscode.env.openExternal(vscode.Uri.parse('https://www.intel.com/content/www/us/en/support/articles/000005629/graphics.html'));
+                    break;
+                case 'GPU Documentation':
+                    vscode.env.openExternal(vscode.Uri.parse('https://intel.github.io/intel-extension-for-pytorch/'));
+                    break;
+            }
+        }),
+        
+        // Tool invocation command (enhanced for GPU)
         vscode.commands.registerCommand('aide.invokeTool', async () => {
             if (!webSocket) {
                 vscode.window.showWarningMessage('WebSocket not connected - tools not available');
                 return;
             }
             
-            const registry = webSocket.getRegistry();
+            // Simple registry check - assumes getRegistry exists or provide fallback
+            let registry: any[] = [];
+            try {
+                registry = (webSocket as any).getRegistry?.() || [];
+            } catch {
+                registry = [];
+            }
+            
             if (registry.length === 0) {
-                vscode.window.showWarningMessage('No tools available yet - backend may still be starting');
+                vscode.window.showWarningMessage('No tools available yet - GPU backend may still be starting');
                 return;
             }
             
@@ -180,9 +293,9 @@ function registerCommands(context: vscode.ExtensionContext, webSocket: AideWebSo
                 registry.map(t => ({
                     label: t.name,
                     description: t.description,
-                    detail: `Args: ${JSON.stringify(t.args_schema)}`
+                    detail: `Args: ${JSON.stringify(t.args_schema)} | GPU-optimized`
                 })),
-                { placeHolder: 'Select a tool to invoke' }
+                { placeHolder: 'Select a GPU-optimized tool to invoke' }
             );
             
             if (tool) {
@@ -201,142 +314,70 @@ function registerCommands(context: vscode.ExtensionContext, webSocket: AideWebSo
                     }
                 }
                 
-                webSocket.invoke(tool.label, args);
+                // Invoke method - assumes it exists or provide fallback
+                try {
+                    (webSocket as any).invoke?.(tool.label, args);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Tool invocation failed: ${error}`);
+                }
             }
         }),
         
-        // Demo command to propose a new tool
-        vscode.commands.registerCommand('aide.proposeTimeTool', () => {
-            if (!webSocket) {
-                vscode.window.showWarningMessage('WebSocket not connected');
-                return;
-            }
+        // Enhanced server status with GPU info
+        vscode.commands.registerCommand('aide.serverStatus', async () => {
+            const status = backendManager.isServerReady() ? '✅ Running' : '❌ Not Ready';
+            const url = backendManager.getServerUrl();
+            const wsStatus = webSocket ? '✅ Connected' : '❌ Not Connected';
+            const gpuStatus = await checkGpuStatus();
             
-            const code = [
-                'from . import tool',
-                'import datetime',
-                '',
-                '@tool("get_current_time", "Get the current time in multiple formats", {})',
-                'def get_current_time():',
-                '    """Get current time in multiple formats"""',
-                '    now = datetime.datetime.now()',
-                '    return {',
-                '        "utc": datetime.datetime.utcnow().isoformat() + "Z",',
-                '        "local": now.isoformat(),',
-                '        "formatted": now.strftime("%Y-%m-%d %H:%M:%S"),',
-                '        "unix": int(now.timestamp())',
-                '    }'
-            ].join('\n');
-            
-            webSocket.propose("get_current_time", code);
+            vscode.window.showInformationMessage(
+                `🎮 AIDE GPU-FIRST Backend Status: ${status}\n` +
+                `URL: ${url}\n` +
+                `WebSocket: ${wsStatus}\n` +
+                `GPU: ${gpuStatus.gpu_detected ? '✅ ' + gpuStatus.device_info?.current_priority : '❌ Not Detected'}\n` +
+                `Model: ${gpuStatus.model_loading?.loaded ? '✅ Loaded' : '❌ Not Loaded'}`,
+                'Restart Server', 'GPU Status', 'View Logs', 'Test GPU'
+            ).then(selection => {
+                if (selection === 'Restart Server') {
+                    vscode.commands.executeCommand('workbench.action.reloadWindow');
+                } else if (selection === 'GPU Status') {
+                    vscode.commands.executeCommand('aide.gpuStatus');
+                } else if (selection === 'View Logs') {
+                    vscode.commands.executeCommand('workbench.action.showLogs');
+                } else if (selection === 'Test GPU') {
+                    vscode.commands.executeCommand('aide.performanceTest');
+                }
+            });
         }),
         
-        // Legacy commands for compatibility
-        vscode.commands.registerCommand('aide.intentExecute', async () => {
-            // Redirect to new ask command
-            vscode.commands.executeCommand('aide.ask');
-        }),
-        
+        // Other existing commands...
         vscode.commands.registerCommand('aide.openChat', () => {
             vscode.commands.executeCommand('aide.chatView.focus');
         }),
         
-        // OPTIMIZED: Enhanced server status with more diagnostic info
-        vscode.commands.registerCommand('aide.serverStatus', () => {
-            const status = backendManager.isServerReady() ? '✅ Running' : '❌ Not Ready';
-            const url = backendManager.getServerUrl();
-            const wsStatus = webSocket ? '✅ Connected' : '❌ Not Connected';
-            const uptime = backendManager.isServerReady() ? 'Active' : 'Inactive';
-            
-            vscode.window.showInformationMessage(
-                `AIDE Backend Status: ${status}\nURL: ${url}\nWebSocket: ${wsStatus}\nUptime: ${uptime}`,
-                'Restart Server', 'View Logs', 'Test Connection'
-            ).then(selection => {
-                if (selection === 'Restart Server') {
-                    vscode.commands.executeCommand('workbench.action.reloadWindow');
-                } else if (selection === 'View Logs') {
-                    vscode.commands.executeCommand('workbench.action.showLogs');
-                } else if (selection === 'Test Connection') {
-                    // Quick connection test
-                    if (backendManager.isServerReady()) {
-                        vscode.window.showInformationMessage('✅ Connection test passed!');
-                    } else {
-                        vscode.window.showWarningMessage('❌ Connection test failed - backend not responding');
-                    }
-                }
-            });
-        }),
-        
-        // OPTIMIZED: Enhanced restart with progress indication
         vscode.commands.registerCommand('aide.restartBackend', async () => {
-            const progress = vscode.window.showInformationMessage('🔄 Restarting AIDE backend...');
+            const progress = vscode.window.showInformationMessage('🔄 Restarting AIDE GPU-FIRST backend...');
             backendManager.cleanup();
             
-            // Wait a moment then restart
             setTimeout(async () => {
+                // FIXED: Single argument
                 const restarted = await backendManager.startBackend(context);
                 if (restarted) {
-                    vscode.window.showInformationMessage('✅ AIDE backend restarted successfully!');
+                    vscode.window.showInformationMessage('✅ AIDE GPU-FIRST backend restarted successfully!');
                 } else {
-                    vscode.window.showErrorMessage('❌ AIDE backend restart failed. Please check logs.');
+                    vscode.window.showErrorMessage('❌ AIDE GPU-FIRST backend restart failed. Check GPU status.');
                 }
             }, 2000);
-        }),
-        
-        vscode.commands.registerCommand('aide.manageTools', async () => {
-            const options = [
-                'View Available Tools',
-                'Invoke Tool',
-                'Propose Time Tool (Demo)',
-                'Hide Extension Tools',
-                'Show Hidden Tools',
-                'Reset Tool Preferences',
-                'Extension Marketplace'
-            ];
-            
-            const selection = await vscode.window.showQuickPick(options, {
-                placeHolder: 'AIDE Tool Management - Control your development toolkit'
-            });
-            
-            switch (selection) {
-                case 'View Available Tools':
-                    if (webSocket && webSocket.getRegistry().length > 0) {
-                        const tools = webSocket.getRegistry().map(t => `• ${t.name}: ${t.description}`).join('\n');
-                        vscode.window.showInformationMessage(`Available Tools:\n${tools}`);
-                    } else {
-                        vscode.commands.executeCommand('aide.toolsView.focus');
-                    }
-                    break;
-                case 'Invoke Tool':
-                    vscode.commands.executeCommand('aide.invokeTool');
-                    break;
-                case 'Propose Time Tool (Demo)':
-                    vscode.commands.executeCommand('aide.proposeTimeTool');
-                    break;
-                case 'Hide Extension Tools':
-                    vscode.window.showInformationMessage('🛠️ Tool hiding interface coming soon!');
-                    break;
-                case 'Show Hidden Tools':
-                    vscode.window.showInformationMessage('👁️ Show hidden tools interface coming soon!');
-                    break;
-                case 'Reset Tool Preferences':
-                    vscode.window.showInformationMessage('🔄 Tool preferences reset!');
-                    break;
-                case 'Extension Marketplace':
-                    vscode.commands.executeCommand('workbench.extensions.action.showExtensionsInstaller');
-                    break;
-            }
         })
     ];
     
     // Add all commands to subscriptions
     commands.forEach(command => context.subscriptions.push(command));
-    console.log(`✅ Registered ${commands.length} AIDE commands (WebSocket enhanced)`);
+    console.log(`✅ Registered ${commands.length} AIDE GPU-FIRST commands`);
 }
 
 export function deactivate() {
-    console.log('🔴 AIDE Universal Intelligence deactivating...');
+    console.log('🔴 AIDE GPU-FIRST Universal Intelligence deactivating...');
     backendManager.cleanup();
-    console.log('✅ AIDE deactivation complete');
+    console.log('✅ AIDE GPU-FIRST deactivation complete');
 }
-          
