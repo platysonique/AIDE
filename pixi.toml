@@ -1,6 +1,3 @@
-# Enhanced pixi.toml with OpenVINO Integration - CORRECTED VERSION
-# FULLY COMPATIBLE - Replace your current pixi.toml with this version
-
 [project]
 name = "aide-codium-extension"
 version = "0.1.0"
@@ -9,15 +6,12 @@ platforms = ["linux-64"]
 
 [dependencies]
 python = "3.11.*"
-# Intel PyTorch stack - keep these in conda to prevent PyPI conflicts
 pytorch = "*"
 intel-extension-for-pytorch = "*"
-# Essential packages moved to conda to prevent PyPI override
 numpy = "*"
 scipy = "*"
 transformers = "*"
 accelerate = "*"
-# Core system dependencies
 ffmpeg = "*"
 qdrant-client = "*"
 pypdf2 = "*"
@@ -40,33 +34,30 @@ hf-transfer = "*"
 
 [pypi-dependencies]
 llama-cpp-python = "*"
-# OpenVINO integration - STABLE VERSIONS for Intel Arc A770 support  
 openvino = "~=2024.3.0"
 openvino-genai = "~=2024.3.0"
 duckduckgo-search = "*"
 sentence-transformers = "*"
 loguru = "*"
-# UI and multimedia
 pillow = "*"
 mistral-common = "*"
 sounddevice = ">=0.5.2, <0.6"
+faiss-cpu = "*"
+openai-whisper = "*"
+pyttsx3 = "*"
+chromadb = "*"
+pytest = "*"
+pytest-asyncio = "*"
 
 [tasks]
-# Model management
 setup-models = "mkdir -p models"
 download-deepseek = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download huihui-ai/DeepSeek-R1-Distill-Qwen-7B-abliterated --local-dir ./models/deepseek"
 download-pixtral = "HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download mistralai/Pixtral-12B-2409 --local-dir ./models/pixtral"
 download-both = "pixi run download-deepseek && pixi run download-pixtral"
-
-# Hardware testing and validation
 test-xpu = "python -c \"import torch; import intel_extension_for_pytorch as ipex; print(f'PyTorch: {torch.__version__}'); print(f'IPEX: {ipex.__version__}'); print(f'XPU available: {torch.xpu.is_available()}'); print(f'Device count: {torch.xpu.device_count() if torch.xpu.is_available() else 0}')\""
 test-openvino-gpu = "python -c \"import openvino as ov; core = ov.Core(); devices = core.available_devices; print('Available devices:', devices); gpu_devices = [d for d in devices if 'GPU' in d]; print('GPU devices:', gpu_devices); print('Arc A770 ready!' if gpu_devices else 'GPU not detected')\""
 test-openvino-genai = "python -c \"from openvino_genai import LLMPipeline; print('✅ OpenVINO GenAI available')\""
-
-# Comprehensive system validation
 validate-intel-stack = "pixi run test-xpu && pixi run test-openvino-gpu && pixi run test-openvino-genai"
 validate-all = "pixi run validate-intel-stack && echo '🎮 Intel Arc A770 stack validation complete!'"
-
-# Development and debugging
-start-backend = "python src/backend/api.py"
+start-backend = "python src/backend/main.py"
 test-backend = "python -c \"import requests; print('Backend test:', requests.get('http://127.0.0.1:8000/health').json())\""
