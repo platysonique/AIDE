@@ -207,7 +207,7 @@ function registerCommands(context: vscode.ExtensionContext, webSocket: AideWebSo
                             } else {
                                 vscode.window.showWarningMessage('GPU backend still not ready. Consider checking GPU status.');
                             }
-                        }, 30000);
+                        }, 60000);
                     }
                 });
             }

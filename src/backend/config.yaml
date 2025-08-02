@@ -1,132 +1,142 @@
 # Enhanced config.yaml with OpenVINO Backend Support + Strategic External APIs + LLAMACPP
-# FULLY COMPATIBLE - Replace your current src/backend/config.yaml with this version
+# FULLY COMPATIBLE – Replace your current src/backend/config.yaml with this version
 
 # ======== Backend and Model Settings ========
+
 host: 127.0.0.1
 port: 8000
+
+# Safe RNG seed (must be 0 ≤ seed ≤ 4_294_967_295 to satisfy NumPy)
+default_seed: 123456        # <- added to prevent “Seed must be between 0 and 2**32 - 1” error
+
 db_path: ./vectors.db
 offline_index_path: ./index/
 gpu_device: xpu
 model: deepseek
 
 # ======== Backend Selection Priority ========
-# NEW: llama.cpp gets TOP priority for GGUF models, then OpenVINO for Intel Arc A770
+
 backend_priority:
-  - "llamacpp"      # Try llama.cpp first for GGUF models (fastest performance)
-  - "openvino"      # Try OpenVINO second for Arc A770 GPU acceleration  
-  - "pytorch_xpu"   # Fallback to PyTorch XPU if available
-  - "pytorch_cpu"   # Final fallback to CPU mode
+  - "llamacpp"     # Try llama.cpp first for GGUF models (fastest performance)
+  - "openvino"     # Try OpenVINO second for Arc A770 GPU acceleration
+  - "pytorch_xpu"  # Fallback to PyTorch XPU if available
+  - "pytorch_cpu"  # Final fallback to CPU mode
 
 # ======== NEW: Llama.cpp Settings ========
+
 llamacpp:
   # GPU offloading (-1 = full GPU, 0 = CPU only, N = N layers on GPU)
-  n_gpu_layers: -1       # Full GPU offload for Intel Arc A770
-  n_ctx: 4096           # Context window size
-  n_batch: 512          # Batch size for processing
-  n_threads: -1         # Use all CPU threads (-1 = auto)
-  use_mlock: true       # Keep model in RAM
-  use_mmap: true        # Use memory mapping
+  n_gpu_layers: -1          # Full GPU offload for Intel Arc A770
+  n_ctx: 32768               # Context window size
+  n_batch: 512              # Batch size for processing
+  n_threads: -1             # Use all CPU threads (-1 = auto)
+  use_mlock: true           # Keep model in RAM
+  use_mmap: true            # Use memory mapping
+
   # Generation defaults
   default_max_tokens: 512
   default_temperature: 0.8
   default_top_p: 0.95
+
   # Intel Arc A770 specific optimizations
-  rope_freq_base: 0.0   # Auto-detect
-  rope_freq_scale: 0.0  # Auto-detect
+  rope_freq_base: 0.0       # Auto-detect
+  rope_freq_scale: 0.0      # Auto-detect
+
   # GGUF model preferences
   preferred_quantization: "Q4_K_M"  # Best balance of speed/quality
-  fallback_quantization: "Q8_0"    # High quality fallback
+  fallback_quantization: "Q8_0"     # High quality fallback
 
 # ======== OpenVINO Specific Settings ========
+
 openvino:
   # Performance optimizations for Intel Arc A770
-  performance_hint: "LATENCY" # Optimized for interactive use
-  cache_models: true # Enable model caching
-  gpu_loop_unrolling: true # Arc A770 optimization
-  disable_winograd: false # Keep winograd for better performance
-  cpu_threads: 0 # Use all CPU threads when on CPU
+  performance_hint: "LATENCY"   # Optimized for interactive use
+  cache_models: true
+  gpu_loop_unrolling: true
+  disable_winograd: false
+  cpu_threads: 0                # Use all CPU threads when on CPU
+
   # Model conversion settings
-  convert_models: true # Auto-convert models to OpenVINO format
-  cache_dir: ".openvino_cache" # Local cache directory
+  convert_models: true
+  cache_dir: ".openvino_cache"
+
   # Generation defaults
   default_max_tokens: 512
   default_temperature: 0.8
   default_top_p: 0.95
 
 # ======== PyTorch XPU Fallback Settings ========
+
 pytorch_xpu:
-  torch_dtype: "float16" # Use FP16 for GPU efficiency
-  low_cpu_mem_usage: true # Memory optimization
-  trust_remote_code: true # Allow custom model code
+  torch_dtype: "float16"
+  low_cpu_mem_usage: true
+  trust_remote_code: true
 
 # ======== CPU Fallback Settings ========
+
 pytorch_cpu:
-  torch_dtype: "float32" # Use FP32 for CPU stability
-  low_cpu_mem_usage: true # Memory optimization for 94GB RAM
-  trust_remote_code: true # Allow custom model code
-  device_map: "cpu" # Explicit CPU mapping
+  torch_dtype: "float32"
+  low_cpu_mem_usage: true
+  trust_remote_code: true
+  device_map: "cpu"
 
 # ======== Hybrid Search & External APIs ========
-# Strategic use of external APIs to enhance local AI capabilities
-# Perplexity AI - for real-time web search and current events
-perplexity_api_key: "" # Your API key goes here
-# Open-Meteo Weather API - free, no key required
-weather_api_enabled: true # Enable weather queries
-# DuckDuckGo web scraping (already in your pixi.toml, no key needed)
-duckduckgo_enabled: true # Free web search fallback
 
-# Search provider priority for different query types
+perplexity_api_key: ""           # Your API key goes here
+weather_api_enabled: true        # Open-Meteo (no key needed)
+duckduckgo_enabled: true         # Free web search fallback
+
 search_routing:
-  weather: "open_meteo" # Weather queries go to Open-Meteo
-  current_events: "perplexity" # News/current events to Perplexity
-  web_search: "duckduckgo" # General web search to DDG scraping
-  fallback: "perplexity" # Everything else to Perplexity if available
+  weather: "open_meteo"
+  current_events: "perplexity"
+  web_search: "duckduckgo"
+  fallback: "perplexity"
 
 # ======== Development and Debugging ========
+
 debug_mode: false
 log_level: "INFO"
 enable_profiling: false
 max_conversation_length: 50
-model_load_timeout: 300 # 5 minutes for large models
-backend_startup_timeout: 300 # 5 minutes for backend initialization
+model_load_timeout: 300          # 5 minutes
+backend_startup_timeout: 300     # 5 minutes
 
 # ======== Hardware Detection Settings ========
+
 hardware:
-  auto_detect: true # Automatically detect optimal hardware
-  prefer_gpu: true # Prefer GPU over CPU when available
-  memory_threshold: 8192 # Minimum MB required for GPU inference
-  force_cpu: false # Force CPU mode (for testing)
+  auto_detect: true
+  prefer_gpu: true
+  memory_threshold: 8192         # MB
+  force_cpu: false
 
 # ======== NEW: Model Format Detection ========
+
 model_formats:
-  # Auto-detect model format and route to appropriate backend
   auto_detect: true
-  # File extension to backend mapping
-  gguf: "llamacpp"      # .gguf files go to llama.cpp
-  safetensors: "pytorch" # .safetensors files go to PyTorch
-  bin: "pytorch"        # .bin files go to PyTorch
-  onnx: "openvino"      # .onnx files go to OpenVINO (if available)
-  # Fallback preference when format is ambiguous
-  ambiguous_fallback: "llamacpp"  # Try llama.cpp first for unknown formats
+  gguf: "llamacpp"
+  safetensors: "pytorch"
+  bin: "pytorch"
+  onnx: "openvino"
+  ambiguous_fallback: "llamacpp"
 
 # ======== Performance Tuning ========
+
 performance:
-  # Streaming settings
-  stream_chunk_size: 1      # Characters per streaming chunk
-  stream_delay_ms: 10       # Milliseconds between chunks
-  # Memory management
-  model_cache_size: 3       # Max models to keep in memory
-  auto_unload_timeout: 300  # Seconds before auto-unloading unused models
-  # Intel Arc A770 specific tuning
-  arc_optimization: true    # Enable Arc-specific optimizations
-  arc_memory_pool: true     # Use Arc memory pooling
+  stream_chunk_size: 1
+  stream_delay_ms: 10
+  model_cache_size: 3
+  auto_unload_timeout: 300
+  arc_optimization: true
+  arc_memory_pool: true
 
 # ======== API Keys Section ========
+
 api_keys:
   perplexity_api_key: ""
   wolframalpha_appid: ""
 
 # ======== Online Search Fallback Order ========
+
 online_search: "duckduckgo"
 fallback_order:
   - "duckduckgo"

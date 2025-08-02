@@ -1,797 +1,961 @@
 import * as vscode from 'vscode';
 
 interface ParsedIntent {
-    intent: string;
-    scope: 'file' | 'workspace' | 'selection';
-    auto_fix: boolean;
-    tools_needed: string[];
-    confidence: number;
-    context_hints?: string[];
+  intent: string;
+  scope: 'file' | 'workspace' | 'selection';
+  auto_fix: boolean;
+  tools_needed: string[];
+  confidence: number;
+  context_hints?: string[];
 }
 
-// NEW: Add interface definitions for API responses
 interface ModelListResponse {
-    models: string[];
-    current: string | null;
-    total_available?: number;
+  models: string[];
+  current: string | null;
+  total_available?: number;
 }
 
 interface ModelSwitchResponse {
-    status: string;
-    active?: string;
-    message?: string;
-    error?: string;
+  status: string;
+  active?: string;
+  message?: string;
+  error?: string;
 }
 
 interface IngestResponse {
-    status: string;
-    message: string;
+  status: string;
+  message: string;
 }
 
-// NEW: Chat response interface
 interface ChatResponse {
-    response: string;
-    model_used?: string;
-    actions?: any[];
-    tools_invoked?: string[];
-    detected_intents?: string[];
-    conversation_type?: string;
-    fallback_reason?: string;
+  response: string;
+  model_used?: string;
+  actions?: any[];
+  tools_invoked?: string[];
+  detected_intents?: string[];
+  conversation_type?: string;
+  fallback_reason?: string;
+}
+
+interface SpeechResult {
+  success: boolean;
+  text?: string;
+  error?: string;
+}
+
+interface SpeechCapabilities {
+  speech_to_text: boolean;
+  text_to_speech: boolean;
+}
+
+interface TTSResult {
+  success: boolean;
+  audio_base64?: string;
+  error?: string;
 }
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
-    private _view?: vscode.WebviewView;
-    private chatHistory: Array<{message: string, type: 'user' | 'system' | 'error', timestamp: string}> = [];
-    private pipeline: any;
-    // ADVANCED DEDUPLICATION SYSTEM - Prevents triple responses
-    private processingMessage = false;
-    private messageQueue: string[] = [];
-    private lastProcessedMessage = '';
-    private lastProcessedTime = 0;
-    private messageTracker = new Set();
-    
-    // NEW: Model management state
-    private availableModels: string[] = [];
-    private currentModel: string | null = null;
+  private _view?: vscode.WebviewView;
+  private chatHistory: Array<{message: string, type: 'user' | 'system' | 'error', timestamp: string}> = [];
+  private pipeline: any;
+  
+  // Speech functionality state
+  private speechSupported = false;
+  
+  // Advanced deduplication system
+  private processingMessage = false;
+  private messageQueue: string[] = [];
+  private lastProcessedMessage = '';
+  private lastProcessedTime = 0;
+  private messageTracker = new Set<string>();
+  
+  // Model management state
+  private availableModels: string[] = [];
+  private currentModel: string | null = null;
+  private refreshing = false;
 
-    constructor(private context: vscode.ExtensionContext, pipeline: any) {
-        this.pipeline = pipeline;
-        this.loadChatHistory(); // Load persisted chat history
-        this.addWelcomeMessage();
-        this.loadAvailableModels(); // Load model list on startup
-    }
+  constructor(private context: vscode.ExtensionContext, pipeline: any) {
+    this.pipeline = pipeline;
+    this.loadChatHistory();
+    this.addWelcomeMessage();
+    this.loadAvailableModels();
+    this.checkSpeechSupport();
+  }
 
-    resolveWebviewView(
-        webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
-        token: vscode.CancellationToken
-    ): void {
-        this._view = webviewView;
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this.context.extensionUri]
-        };
+  resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    context: vscode.WebviewViewResolveContext,
+    token: vscode.CancellationToken
+  ): void {
+    this._view = webviewView;
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this.context.extensionUri]
+    };
 
-        webviewView.webview.html = this.getWebviewContent();
+    webviewView.webview.html = this.getWebviewContent();
 
-        webviewView.webview.onDidReceiveMessage(async (message) => {
-            switch (message.command) {
-                case 'userMessage':
-                    await this.handleUserMessageWithAdvancedDeduplication(message.text);
-                    break;
-                case 'clearChat':
-                    this.clearChat();
-                    break;
-                case 'switchModel':
-                    await this.switchModel(message.model);
-                    break;
-                case 'refreshModels':
-                    await this.loadAvailableModels();
-                    break;
-                case 'ingestDocument':
-                    await this.ingestDocument();
-                    break;
-            }
-        });
-
-        this.refreshChat();
-    }
-
-    // FIXED: Load available models from backend with proper typing
-    private async loadAvailableModels() {
-        try {
-            const response = await fetch('http://127.0.0.1:8000/models');
-            if (response.ok) {
-                const data = await response.json() as ModelListResponse; // ← TYPE ASSERTION ADDED
-                this.availableModels = data.models || [];
-                this.currentModel = data.current || null;
-                
-                // Update UI with model list
-                if (this._view?.webview) {
-                    this._view.webview.postMessage({
-                        command: 'updateModels',
-                        models: this.availableModels,
-                        current: this.currentModel
-                    });
-                }
-                
-                console.log(`🤖 Loaded ${this.availableModels.length} models, current: ${this.currentModel}`);
-            }
-        } catch (error) {
-            console.error('Failed to load models:', error);
-            this.addChatMessage('⚠️ Could not load available models. Backend may not be running.', 'error');
+    webviewView.webview.onDidReceiveMessage(async (message: any) => {
+      try {
+        switch (message.command) {
+          case 'userMessage':
+            await this.handleUserMessageWithAdvancedDeduplication(message.text);
+            break;
+          case 'clearChat':
+            this.clearChat();
+            break;
+          case 'switchModel':
+            await this.switchModel(message.model);
+            break;
+          case 'refreshModels':
+            await this.loadAvailableModels();
+            break;
+          case 'ingestDocument':
+            await this.ingestDocument();
+            break;
+          case 'startSpeechRecording':
+            await this.startSpeechRecording();
+            break;
+          case 'stopSpeechRecording':
+            await this.stopSpeechRecording();
+            break;
+          case 'playTTS':
+            await this.playTextToSpeech(message.text);
+            break;
+          case 'processSpeech':
+            await this.processSpeechInput(message.audioBase64);
+            break;
         }
-    }
+      } catch (error) {
+        console.error('Error handling webview message:', error);
+        this.addChatMessage(`❌ Error: ${error}`, 'error');
+      }
+    });
 
-    // FIXED: Switch to a different model with proper typing
-    private async switchModel(modelName: string) {
-        try {
-            this.addChatMessage(`🔄 Switching to model: ${modelName}...`, 'system');
-            
-            const response = await fetch('http://127.0.0.1:8000/models/use', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: modelName })
-            });
+    this.refreshChat();
+  }
 
-            const result = await response.json() as ModelSwitchResponse; // ← TYPE ASSERTION ADDED
-            
-            if (result.status === 'success') {
-                this.currentModel = modelName;
-                this.addChatMessage(`✅ Successfully switched to ${modelName}! Your beast hardware is now running this model.`, 'system');
-                
-                // Update UI
-                if (this._view?.webview) {
-                    this._view.webview.postMessage({
-                        command: 'modelSwitched',
-                        model: modelName
-                    });
-                }
-            } else {
-                this.addChatMessage(`❌ Failed to switch model: ${result.error || 'Unknown error'}`, 'error'); // ← SAFE ACCESS
-            }
-        } catch (error) {
-            this.addChatMessage(`❌ Model switch error: ${error}`, 'error');
-        }
-    }
-
-    // FIXED: Document ingestion with proper typing
-    private async ingestDocument() {
-        const options: vscode.OpenDialogOptions = {
-            canSelectMany: false,
-            openLabel: 'Ingest Document',
-            filters: {
-                'Text files': ['txt', 'md', 'py', 'js', 'ts', 'json', 'yaml', 'yml'],
-                'All files': ['*']
-            }
-        };
-
-        const fileUri = await vscode.window.showOpenDialog(options);
-        if (fileUri && fileUri[0]) {
-            try {
-                this.addChatMessage(`📄 Ingesting document: ${fileUri[0].fsPath}...`, 'system');
-                
-                const response = await fetch('http://127.0.0.1:8000/ingest', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        file_path: fileUri[0].fsPath,
-                        file_name: fileUri[0].fsPath.split('/').pop()
-                    })
-                });
-
-                const result = await response.json() as IngestResponse; // ← TYPE ASSERTION ADDED
-                
-                if (result.status === 'success') {
-                    this.addChatMessage(`✅ Document ingested successfully!`, 'system');
-                } else {
-                    this.addChatMessage(`❌ Ingestion failed: ${result.message || 'Unknown error'}`, 'error'); // ← SAFE ACCESS
-                }
-            } catch (error) {
-                this.addChatMessage(`❌ Ingestion error: ${error}`, 'error');
-            }
-        }
-    }
-
-    // NEW: Load chat history from workspace state
-    private loadChatHistory() {
-        const savedHistory = this.context.workspaceState.get<Array<{message: string, type: 'user' | 'system' | 'error', timestamp: string}>>('chatHistory', []);
-        this.chatHistory = savedHistory;
-    }
-
-    // NEW: Save chat history to workspace state
-    private saveChatHistory() {
-        this.context.workspaceState.update('chatHistory', this.chatHistory);
-    }
-
-    private addWelcomeMessage() {
-        // Only add welcome message if chat history is empty
-        if (this.chatHistory.length === 0) {
-            this.chatHistory.push({
-                message: '🎯 AIDE LLM-First Conversation Ready! Your Intel Arc A770 + 94GB RAM is ready to crush AI inference. Load a model and let\'s code!',
-                type: 'system',
-                timestamp: new Date().toLocaleTimeString()
-            });
-        }
-    }
-
-    // FIXED: Advanced message deduplication system
-    private async handleUserMessageWithAdvancedDeduplication(text: string): Promise<void> {
-        if (!this._view) return;
-
-        const now = Date.now();
-        const messageHash = `${text}_${Math.floor(now / 1000)}`; // Hash with second precision
-
-        // Prevent duplicate processing within 3 seconds
-        if (this.processingMessage) {
-            console.log('⚠️ Message already being processed, ignoring duplicate');
-            return;
-        }
-
-        // Check for exact duplicate message within 3 seconds
-        if (text === this.lastProcessedMessage && now - this.lastProcessedTime < 3000) {
-            console.log('⚠️ Duplicate message detected within 3 seconds, ignoring');
-            return;
-        }
-
-        // Check message tracker for recent duplicates
-        if (this.messageTracker.has(messageHash)) {
-            console.log('⚠️ Message hash already processed, ignoring');
-            return;
-        }
-
-        // Update tracking
-        this.lastProcessedMessage = text;
-        this.lastProcessedTime = now;
-        this.messageTracker.add(messageHash);
-
-        // Clean old message hashes (older than 10 seconds)
-        setTimeout(() => {
-            this.messageTracker.delete(messageHash);
-        }, 10000);
-
-        // Add to queue and process
-        this.messageQueue.push(text);
-        await this.processMessageQueue();
-    }
-
-    // 🚀 THE BREAKTHROUGH: Direct Backend API Integration
-    private async processMessageQueue(): Promise<void> {
-        if (this.processingMessage || this.messageQueue.length === 0) {
-            return;
-        }
-
-        this.processingMessage = true;
-        try {
-            const text = this.messageQueue.shift()!;
-            console.log(`🤖 Processing message: "${text}"`);
-
-            // Add user message to history
-            this.addChatMessage(`👤 ${text}`, 'user');
-            this.addChatMessage(`🤔 Analyzing with AI model...`, 'system');
-
-            // 🔥 BYPASS PIPELINE - Call backend API directly!
-            try {
-                const response = await fetch('http://127.0.0.1:8000/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: text,
-                        context: {
-                            currentFile: vscode.window.activeTextEditor?.document ? {
-                                filename: vscode.window.activeTextEditor.document.fileName,
-                                language: vscode.window.activeTextEditor.document.languageId,
-                                selection: vscode.window.activeTextEditor.selection ? 
-                                    vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection) : null
-                            } : null,
-                            workspace: {
-                                name: vscode.workspace.name || 'No workspace',
-                                rootPath: vscode.workspace.rootPath
-                            }
-                        }
-                    })
-                });
-
-                if (response.ok) {
-                    const result = await response.json() as ChatResponse;
-                    
-                    // Display AI response
-                    this.addChatMessage(result.response, 'system');
-                    
-                    // Show model used if available
-                    if (result.model_used) {
-                        this.addChatMessage(`🤖 Powered by: ${result.model_used}`, 'system');
-                    }
-                    
-                    // Show conversation type for debugging
-                    if (result.conversation_type) {
-                        console.log(`💡 Conversation type: ${result.conversation_type}`);
-                        if (result.conversation_type === 'regex_fallback' && result.fallback_reason) {
-                            this.addChatMessage(`⚠️ Note: Using fallback mode - ${result.fallback_reason}`, 'system');
-                        }
-                    }
-                    
-                    // Show tools invoked if any
-                    if (result.tools_invoked && result.tools_invoked.length > 0) {
-                        this.addChatMessage(`🔧 Tools used: ${result.tools_invoked.join(', ')}`, 'system');
-                    }
-                    
-                } else {
-                    throw new Error(`Backend API returned ${response.status}: ${response.statusText}`);
-                }
-                
-            } catch (apiError) {
-                console.error('Backend API error:', apiError);
-                this.addChatMessage(`❌ AI Backend Error: ${apiError}`, 'error');
-                this.addChatMessage('💭 Tip: Make sure your Python backend is running on port 8000', 'system');
-                
-                // Optional: Fallback to pipeline only if backend is completely unavailable
-                if (this.pipeline) {
-                    this.addChatMessage('🔄 Attempting fallback to local pipeline...', 'system');
-                    try {
-                        const responseTracker = new Set();
-                        let responseCount = 0;
-
-                        await this.pipeline.executeIntent(text, (message: string) => {
-                            const messageSignature = message.replace(/[🎯✅💬🤖🔧📚🎨⚡\d]/g, '').trim();
-                            if (messageSignature.length >= 3 && !responseTracker.has(messageSignature) && !this.isDuplicateMessage(message)) {
-                                responseTracker.add(messageSignature);
-                                responseCount++;
-                                if (responseCount <= 3) {
-                                    this.addChatMessage(message, 'system');
-                                }
-                            }
-                        });
-                    } catch (pipelineError) {
-                        this.addChatMessage(`❌ Pipeline fallback also failed: ${pipelineError}`, 'error');
-                    }
-                }
-            }
-
-        } catch (error: any) {
-            console.error('Chat message processing error:', error);
-            this.addChatMessage(`❌ Error: ${error.message || error}`, 'error');
-        } finally {
-            this.processingMessage = false;
-            // Process next message in queue if any (with delay to prevent overwhelm)
-            if (this.messageQueue.length > 0) {
-                setTimeout(() => this.processMessageQueue(), 500);
-            }
-        }
-    }
-
-    private isDuplicateMessage(message: string): boolean {
-        // Check if this exact message was added in the last 5 seconds
-        const now = new Date().getTime();
-        const recentMessages = this.chatHistory.filter(entry => {
-            const entryTime = new Date(entry.timestamp).getTime();
-            return now - entryTime < 5000; // 5 second window
-        });
-
-        // Compare cleaned message content (removing emojis and timestamps)
-        const cleanMessage = message.replace(/[🎯✅💬🤖🔧📚🎨⚡\d]/g, '').trim();
-        return recentMessages.some(entry => {
-            const cleanEntry = entry.message.replace(/[🎯✅💬🤖🔧📚🎨⚡\d]/g, '').trim();
-            return cleanEntry === cleanMessage;
-        });
-    }
-
-    private addChatMessage(text: string, type: 'user' | 'system' | 'error') {
-        const timestamp = new Date().toLocaleTimeString();
-
-        // Additional duplicate check with enhanced logic
-        if (this.isDuplicateMessage(text)) {
-            console.log(`⚠️ Skipping duplicate message: "${text.substring(0, 50)}..."`);
-            return;
-        }
-
-        this.chatHistory.push({
-            message: text,
-            type,
-            timestamp
-        });
-
-        // Limit chat history to prevent memory issues
-        if (this.chatHistory.length > 100) {
-            this.chatHistory = this.chatHistory.slice(-80); // Keep last 80 messages
-        }
-
-        // Save to workspace state for persistence
-        this.saveChatHistory();
-
+  // Speech support detection
+  private async checkSpeechSupport() {
+    try {
+      const response = await fetch('http://127.0.0.1:8000/speech/capabilities');
+      if (response.ok) {
+        const data = await response.json() as SpeechCapabilities;
+        this.speechSupported = data.speech_to_text || data.text_to_speech;
         if (this._view?.webview) {
-            this._view.webview.postMessage({
-                command: 'appendMessage',
-                message: text,
-                type,
-                timestamp
-            });
+          this._view.webview.postMessage({
+            command: 'speechSupport',
+            supported: this.speechSupported,
+            capabilities: data
+          });
         }
+      }
+    } catch (error) {
+      console.error('Speech support check failed:', error);
+      this.speechSupported = false;
+    }
+  }
+
+  // Start speech recording - delegated to webview
+  private async startSpeechRecording() {
+    if (!this.speechSupported) {
+      this.addChatMessage('❌ Speech recognition not supported by backend', 'error');
+      return;
     }
 
-    public clearChat() {
-        this.chatHistory = [];
-        this.messageQueue = [];
-        this.processingMessage = false;
-        this.lastProcessedMessage = '';
-        this.lastProcessedTime = 0;
-        this.messageTracker.clear();
-        
-        // Clear from workspace state
-        this.context.workspaceState.update('chatHistory', []);
-        
-        this.addWelcomeMessage();
-        this.refreshChat();
+    this.addChatMessage('🎤 Speech recording will start in webview...', 'system');
+    
+    if (this._view?.webview) {
+      this._view.webview.postMessage({
+        command: 'startRecording'
+      });
+    }
+  }
+
+  // Stop speech recording - delegated to webview
+  private async stopSpeechRecording() {
+    if (this._view?.webview) {
+      this._view.webview.postMessage({
+        command: 'stopRecording'
+      });
+    }
+  }
+
+  // Process speech input from webview
+  private async processSpeechInput(audioBase64: string) {
+    try {
+      this.addChatMessage('🎤 Processing speech...', 'system');
+      
+      const response = await fetch('http://127.0.0.1:8000/speech/stt/base64', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          audio_base64: audioBase64,
+          format: 'wav'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      const result = await response.json() as SpeechResult;
+      
+      if (result.success && result.text) {
+        this.addChatMessage(`🎙️ You said: "${result.text}"`, 'system');
+        await this.handleUserMessageWithAdvancedDeduplication(result.text);
+      } else {
+        this.addChatMessage(`❌ Speech recognition failed: ${result.error || 'Unknown error'}`, 'error');
+      }
+      
+    } catch (error) {
+      console.error('Speech processing failed:', error);
+      this.addChatMessage(`❌ Speech processing failed: ${error}`, 'error');
+    }
+  }
+
+  // Text-to-speech
+  private async playTextToSpeech(text: string) {
+    if (!this.speechSupported) {
+      this.addChatMessage('❌ Text-to-speech not supported', 'error');
+      return;
     }
 
-    private refreshChat() {
-        if (!this._view) return;
-        this._view.webview.postMessage({
-            command: 'refreshChat',
-            history: this.chatHistory
+    try {
+      this.addChatMessage('🔊 Playing text-to-speech...', 'system');
+      
+      const response = await fetch('http://127.0.0.1:8000/speech/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          text: text,
+          return_audio: 'true'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      const result = await response.json() as TTSResult;
+      
+      if (result.success && result.audio_base64) {
+        if (this._view?.webview) {
+          this._view.webview.postMessage({
+            command: 'playAudio',
+            audioBase64: result.audio_base64
+          });
+        }
+        this.addChatMessage('✅ Text-to-speech completed', 'system');
+      } else {
+        this.addChatMessage(`❌ TTS failed: ${result.error || 'Unknown error'}`, 'error');
+      }
+      
+    } catch (error) {
+      console.error('TTS failed:', error);
+      this.addChatMessage(`❌ TTS error: ${error}`, 'error');
+    }
+  }
+
+  // Enhanced model loading with debouncing
+  private async loadAvailableModels() {
+    if (this.refreshing) {
+      console.log('🔄 Already refreshing models, skipping duplicate request');
+      return;
+    }
+    
+    this.refreshing = true;
+    try {
+      console.log('🔄 Loading available models from backend...');
+      const response = await fetch('http://127.0.0.1:8000/models');
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const data = await response.json() as ModelListResponse;
+      this.availableModels = data.models || [];
+      this.currentModel = data.current || null;
+      
+      // Update UI with model list
+      this._view?.show?.(true);
+      this._view?.webview.postMessage({
+        command: 'updateModels',
+        models: this.availableModels,
+        current: this.currentModel
+      });
+
+      console.log(`🤖 Loaded ${this.availableModels.length} models, current: ${this.currentModel}`);
+      
+      if (this.availableModels.length === 0) {
+        this.addChatMessage('⚠️ No models found. Make sure your backend has models configured.', 'error');
+      }
+      
+    } catch (error) {
+      console.error('Failed to load models:', error);
+      this.addChatMessage(`⚠️ Could not load available models: ${error}`, 'error');
+      this.addChatMessage('💡 Tip: Check if your backend is running on port 8000', 'system');
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  // Improved model switching with better error handling
+  private async switchModel(modelName: string) {
+    if (!modelName) {
+      this.addChatMessage('❌ No model selected', 'error');
+      return;
+    }
+    
+    try {
+      this.addChatMessage(`🔄 Switching to model: ${modelName}...`, 'system');
+      
+      const response = await fetch('http://127.0.0.1:8000/models/use', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: modelName })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const result = await response.json() as ModelSwitchResponse;
+      
+      if (result.status === 'success') {
+        this.currentModel = modelName;
+        this.addChatMessage(`✅ Successfully switched to ${modelName}! Your Arc A770 beast is now running this model.`, 'system');
+        
+        // Update UI
+        this._view?.webview.postMessage({
+          command: 'modelSwitched',
+          model: modelName
         });
+        
+      } else {
+        throw new Error(result.error || result.message || 'Unknown error');
+      }
+      
+    } catch (error) {
+      console.error('Model switch error:', error);
+      this.addChatMessage(`❌ Model switch failed: ${error}`, 'error');
+    }
+  }
+
+  // Enhanced document ingestion
+  private async ingestDocument() {
+    const options: vscode.OpenDialogOptions = {
+      canSelectMany: false,
+      openLabel: 'Ingest Document',
+      filters: {
+        'Text files': ['txt', 'md', 'py', 'js', 'ts', 'json', 'yaml', 'yml', 'csv'],
+        'Documents': ['pdf', 'docx', 'doc'],
+        'All files': ['*']
+      }
+    };
+
+    const fileUri = await vscode.window.showOpenDialog(options);
+    if (!fileUri || !fileUri[0]) {
+      return;
     }
 
-    public postMessage(message: string, type: 'system' | 'error' = 'system') {
-        this.addChatMessage(message, type);
+    const filePath = fileUri[0].fsPath;
+    const fileName = fileUri[0].fsPath.split('/').pop() || 'unknown';
+    
+    try {
+      this.addChatMessage(`📄 Ingesting document: ${fileName}...`, 'system');
+      
+      const response = await fetch('http://127.0.0.1:8000/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_path: filePath,
+          file_name: fileName
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json() as IngestResponse;
+      
+      if (result.status === 'success') {
+        this.addChatMessage(`✅ Document "${fileName}" ingested successfully!`, 'system');
+        this.addChatMessage(`💡 You can now ask questions about this document.`, 'system');
+      } else {
+        throw new Error(result.message || 'Unknown ingestion error');
+      }
+      
+    } catch (error) {
+      console.error('Ingestion error:', error);
+      this.addChatMessage(`❌ Ingestion failed: ${error}`, 'error');
+    }
+  }
+
+  // Load chat history from workspace state
+  private loadChatHistory() {
+    const savedHistory = this.context.workspaceState.get<Array<{message: string, type: 'user' | 'system' | 'error', timestamp: string}>>('chatHistory', []);
+    this.chatHistory = savedHistory;
+  }
+
+  // Save chat history to workspace state
+  private saveChatHistory() {
+    this.context.workspaceState.update('chatHistory', this.chatHistory);
+  }
+
+  private addWelcomeMessage() {
+    if (this.chatHistory.length === 0) {
+      this.chatHistory.push({
+        message: '🎯 AIDE Enhanced Chat Ready! Features: Voice input 🎤, Text-to-speech 🔊, Model switching 🤖, Document ingestion 📄',
+        type: 'system',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
+  }
+
+  // Advanced message deduplication system
+  private async handleUserMessageWithAdvancedDeduplication(text: string): Promise<void> {
+    if (!this._view) return;
+    
+    const now = Date.now();
+    const messageHash = `${text}_${Math.floor(now / 1000)}`;
+    
+    // Prevent duplicate processing within 3 seconds
+    if (this.processingMessage) {
+      console.log('⚠️ Message already being processed, ignoring duplicate');
+      return;
     }
 
-    public async executeDirectIntent(text: string): Promise<void> {
-        await this.handleUserMessageWithAdvancedDeduplication(text);
+    // Check for exact duplicate message within 3 seconds
+    if (text === this.lastProcessedMessage && now - this.lastProcessedTime < 3000) {
+      console.log('⚠️ Duplicate message detected within 3 seconds, ignoring');
+      return;
     }
 
-    private getWebviewContent(): string {
-        return `
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>AIDE Chat</title>
-                <style>
-                    body {
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                        margin: 0;
-                        padding: 0;
-                        background-color: var(--vscode-editor-background);
-                        color: var(--vscode-editor-foreground);
-                        height: 100vh;
-                        display: flex;
-                        flex-direction: column;
-                    }
-                    
-                    .header {
-                        background-color: var(--vscode-panel-background);
-                        border-bottom: 1px solid var(--vscode-panel-border);
-                        padding: 12px;
-                        flex-shrink: 0;
-                    }
-                    
-                    .header h3 {
-                        margin: 0;
-                        font-size: 14px;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                    }
-                    
-                    .model-controls {
-                        margin-top: 8px;
-                        display: flex;
-                        gap: 8px;
-                        align-items: center;
-                        flex-wrap: wrap;
-                    }
-                    
-                    .model-select {
-                        background-color: var(--vscode-dropdown-background);
-                        border: 1px solid var(--vscode-dropdown-border);
-                        color: var(--vscode-dropdown-foreground);
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 12px;
-                        min-width: 120px;
-                    }
-                    
-                    .btn {
-                        background-color: var(--vscode-button-background);
-                        border: none;
-                        color: var(--vscode-button-foreground);
-                        padding: 4px 12px;
-                        border-radius: 4px;
-                        cursor: pointer;
-                        font-size: 12px;
-                        display: flex;
-                        align-items: center;
-                        gap: 4px;
-                    }
-                    
-                    .btn:hover {
-                        background-color: var(--vscode-button-hoverBackground);
-                    }
-                    
-                    .btn-secondary {
-                        background-color: var(--vscode-button-secondaryBackground);
-                        color: var(--vscode-button-secondaryForeground);
-                    }
-                    
-                    .btn-secondary:hover {
-                        background-color: var(--vscode-button-secondaryHoverBackground);
-                    }
-                    
-                    .chat-container {
-                        flex: 1;
-                        overflow-y: auto;
-                        padding: 12px;
-                        display: flex;
-                        flex-direction: column;
-                        gap: 12px;
-                    }
-                    
-                    .message {
-                        max-width: 100%;
-                        word-wrap: break-word;
-                        padding: 8px 12px;
-                        border-radius: 8px;
-                        line-height: 1.4;
-                        font-size: 13px;
-                    }
-                    
-                    .message.user {
-                        background-color: var(--vscode-inputValidation-infoBorder);
-                        color: var(--vscode-inputValidation-infoForeground);
-                        margin-left: 20%;
-                    }
-                    
-                    .message.system {
-                        background-color: var(--vscode-textBlockQuote-background);
-                        border-left: 3px solid var(--vscode-textBlockQuote-border);
-                    }
-                    
-                    .message.error {
-                        background-color: var(--vscode-inputValidation-errorBackground);
-                        color: var(--vscode-inputValidation-errorForeground);
-                        border-left: 3px solid var(--vscode-inputValidation-errorBorder);
-                    }
-                    
-                    .timestamp {
-                        font-size: 10px;
-                        opacity: 0.7;
-                        margin-top: 4px;
-                    }
-                    
-                    .input-section {
-                        flex-shrink: 0;
-                        background-color: var(--vscode-panel-background);
-                        border-top: 1px solid var(--vscode-panel-border);
-                        padding: 12px;
-                    }
-                    
-                    .input-container {
-                        display: flex;
-                        gap: 8px;
-                        align-items: flex-end;
-                    }
-                    
-                    .input-field {
-                        flex: 1;
-                        background-color: var(--vscode-input-background);
-                        border: 1px solid var(--vscode-input-border);
-                        color: var(--vscode-input-foreground);
-                        padding: 8px 12px;
-                        border-radius: 4px;
-                        font-size: 13px;
-                        resize: vertical;
-                        min-height: 20px;
-                        max-height: 100px;
-                        font-family: inherit;
-                    }
-                    
-                    .input-field:focus {
-                        outline: none;
-                        border-color: var(--vscode-focusBorder);
-                    }
-                    
-                    .current-model {
-                        font-size: 11px;
-                        color: var(--vscode-descriptionForeground);
-                        font-weight: normal;
-                    }
-                    
-                    .status-indicator {
-                        display: inline-block;
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 50%;
-                        margin-right: 6px;
-                    }
-                    
-                    .status-ready { background-color: #4CAF50; }
-                    .status-loading { background-color: #FF9800; }
-                    .status-error { background-color: #F44336; }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <h3>
-                        <span class="status-indicator status-ready"></span>
-                        AIDE LLM-First Chat
-                        <span class="current-model" id="currentModelDisplay">Loading models...</span>
-                    </h3>
-                    <div class="model-controls">
-                        <select class="model-select" id="modelSelect">
-                            <option value="">Loading models...</option>
-                        </select>
-                        <button class="btn btn-secondary" onclick="refreshModels()">🔄 Refresh</button>
-                        <button class="btn btn-secondary" onclick="ingestDocument()">📄 Ingest</button>
-                        <button class="btn btn-secondary" onclick="clearChat()">🗑️ Clear</button>
-                    </div>
-                </div>
-                
-                <div class="chat-container" id="chatContainer">
-                    <!-- Chat messages will be inserted here -->
-                </div>
-                
-                <div class="input-section">
-                    <div class="input-container">
-                        <textarea 
-                            class="input-field" 
-                            id="messageInput" 
-                            placeholder="Ask AIDE anything... (Shift+Enter for new line)"
-                            rows="1"
-                        ></textarea>
-                        <button class="btn" onclick="sendMessage()">Send</button>
-                    </div>
-                </div>
-
-                <script>
-                    const vscode = acquireVsCodeApi();
-                    let chatHistory = [];
-                    let availableModels = [];
-                    let currentModel = null;
-
-                    // Handle messages from extension
-                    window.addEventListener('message', event => {
-                        const message = event.data;
-                        switch (message.command) {
-                            case 'appendMessage':
-                                appendMessage(message.message, message.type, message.timestamp);
-                                break;
-                            case 'refreshChat':
-                                chatHistory = message.history || [];
-                                refreshChatDisplay();
-                                break;
-                            case 'updateModels':
-                                updateModelList(message.models, message.current);
-                                break;
-                            case 'modelSwitched':
-                                currentModel = message.model;
-                                updateCurrentModelDisplay();
-                                break;
-                        }
-                    });
-
-                    function updateModelList(models, current) {
-                        availableModels = models || [];
-                        currentModel = current;
-                        
-                        const select = document.getElementById('modelSelect');
-                        select.innerHTML = '';
-                        
-                        if (availableModels.length === 0) {
-                            select.innerHTML = '<option value="">No models found</option>';
-                        } else {
-                            availableModels.forEach(model => {
-                                const option = document.createElement('option');
-                                option.value = model;
-                                option.textContent = model;
-                                option.selected = model === currentModel;
-                                select.appendChild(option);
-                            });
-                        }
-                        
-                        updateCurrentModelDisplay();
-                        
-                        // Add change event listener
-                        select.onchange = function() {
-                            if (this.value && this.value !== currentModel) {
-                                vscode.postMessage({
-                                    command: 'switchModel',
-                                    model: this.value
-                                });
-                            }
-                        };
-                    }
-
-                    function updateCurrentModelDisplay() {
-                        const display = document.getElementById('currentModelDisplay');
-                        if (currentModel) {
-                            display.textContent = \`Model: \${currentModel}\`;
-                            display.style.color = 'var(--vscode-charts-green)';
-                        } else {
-                            display.textContent = 'No model loaded';
-                            display.style.color = 'var(--vscode-charts-orange)';
-                        }
-                    }
-
-                    function refreshModels() {
-                        vscode.postMessage({ command: 'refreshModels' });
-                    }
-
-                    function ingestDocument() {
-                        vscode.postMessage({ command: 'ingestDocument' });
-                    }
-
-                    function sendMessage() {
-                        const input = document.getElementById('messageInput');
-                        const message = input.value.trim();
-                        if (message) {
-                            vscode.postMessage({
-                                command: 'userMessage',
-                                text: message
-                            });
-                            input.value = '';
-                            input.style.height = 'auto';
-                        }
-                    }
-
-                    function clearChat() {
-                        vscode.postMessage({ command: 'clearChat' });
-                    }
-
-                    function appendMessage(text, type, timestamp) {
-                        chatHistory.push({ message: text, type, timestamp });
-                        addMessageToDOM(text, type, timestamp);
-                        scrollToBottom();
-                    }
-
-                    function addMessageToDOM(text, type, timestamp) {
-                        const container = document.getElementById('chatContainer');
-                        const messageDiv = document.createElement('div');
-                        messageDiv.className = \`message \${type}\`;
-                        
-                        const messageText = document.createElement('div');
-                        messageText.textContent = text;
-                        
-                        const timestampDiv = document.createElement('div');
-                        timestampDiv.className = 'timestamp';
-                        timestampDiv.textContent = timestamp;
-                        
-                        messageDiv.appendChild(messageText);
-                        messageDiv.appendChild(timestampDiv);
-                        container.appendChild(messageDiv);
-                    }
-
-                    function refreshChatDisplay() {
-                        const container = document.getElementById('chatContainer');
-                        container.innerHTML = '';
-                        chatHistory.forEach(msg => {
-                            addMessageToDOM(msg.message, msg.type, msg.timestamp);
-                        });
-                        scrollToBottom();
-                    }
-
-                    function scrollToBottom() {
-                        const container = document.getElementById('chatContainer');
-                        container.scrollTop = container.scrollHeight;
-                    }
-
-                    // Handle Enter key
-                    document.getElementById('messageInput').addEventListener('keydown', function(e) {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            sendMessage();
-                        }
-                    });
-
-                    // Auto-resize textarea
-                    document.getElementById('messageInput').addEventListener('input', function() {
-                        this.style.height = 'auto';
-                        this.style.height = this.scrollHeight + 'px';
-                    });
-                </script>
-            </body>
-            </html>
-        `;
+    // Check message tracker for recent duplicates
+    if (this.messageTracker.has(messageHash)) {
+      console.log('⚠️ Message hash already processed, ignoring');
+      return;
     }
+
+    // Update tracking
+    this.lastProcessedMessage = text;
+    this.lastProcessedTime = now;
+    this.messageTracker.add(messageHash);
+    
+    // Clean old message hashes (older than 10 seconds)
+    setTimeout(() => {
+      this.messageTracker.delete(messageHash);
+    }, 10000);
+
+    // Add to queue and process
+    this.messageQueue.push(text);
+    await this.processMessageQueue();
+  }
+
+  // Enhanced message processing with better error recovery
+  private async processMessageQueue(): Promise<void> {
+    if (this.processingMessage || this.messageQueue.length === 0) {
+      return;
+    }
+
+    this.processingMessage = true;
+    let text: string | undefined;
+    
+    try {
+      text = this.messageQueue.shift()!;
+      console.log(`🤖 Processing message: "${text}"`);
+      
+      // Add user message to history
+      this.addChatMessage(`👤 ${text}`, 'user');
+      this.addChatMessage(`🤔 Processing with enhanced backend...`, 'system');
+      
+      // Get current context
+      const currentFile = vscode.window.activeTextEditor?.document;
+      const selection = vscode.window.activeTextEditor?.selection;
+      
+      const requestBody = {
+        message: text,
+        context: {
+          currentFile: currentFile ? {
+            filename: currentFile.fileName,
+            language: currentFile.languageId,
+            selection: selection && !selection.isEmpty ? 
+              currentFile.getText(selection) : null
+          } : null,
+          workspace: {
+            name: vscode.workspace.name || 'No workspace',
+            rootPath: vscode.workspace.rootPath
+          }
+        }
+      };
+      
+      const response = await fetch('http://127.0.0.1:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Backend API returned ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json() as ChatResponse;
+      
+      // Display AI response
+      this.addChatMessage(result.response, 'system');
+      
+      // Show additional info if available
+      if (result.model_used) {
+        this.addChatMessage(`🤖 Powered by: ${result.model_used}`, 'system');
+      }
+      
+      if (result.conversation_type === 'regex_fallback' && result.fallback_reason) {
+        this.addChatMessage(`⚠️ Note: Using fallback mode - ${result.fallback_reason}`, 'system');
+      }
+      
+      if (result.tools_invoked && result.tools_invoked.length > 0) {
+        this.addChatMessage(`🔧 Tools used: ${result.tools_invoked.join(', ')}`, 'system');
+      }
+      
+    } catch (apiError) {
+      console.error('Backend API error:', apiError);
+      this.addChatMessage(`❌ AI Backend Error: ${apiError}`, 'error');
+      this.addChatMessage('💭 Tip: Make sure your Python backend is running on port 8000', 'system');
+      
+    } finally {
+      this.processingMessage = false;
+      
+      // Process next message in queue with delay
+      if (this.messageQueue.length > 0) {
+        setTimeout(() => this.processMessageQueue(), 500);
+      }
+    }
+  }
+
+  private addChatMessage(text: string, type: 'user' | 'system' | 'error') {
+    const timestamp = new Date().toLocaleTimeString();
+    
+    this.chatHistory.push({
+      message: text,
+      type,
+      timestamp
+    });
+
+    // Limit chat history to prevent memory issues
+    if (this.chatHistory.length > 100) {
+      this.chatHistory = this.chatHistory.slice(-80); // Keep last 80 messages
+    }
+
+    // Save to workspace state for persistence
+    this.saveChatHistory();
+
+    if (this._view?.webview) {
+      this._view.webview.postMessage({
+        command: 'appendMessage',
+        message: text,
+        type,
+        timestamp
+      });
+    }
+  }
+
+  public clearChat() {
+    this.chatHistory = [];
+    this.messageQueue = [];
+    this.processingMessage = false;
+    this.lastProcessedMessage = '';
+    this.lastProcessedTime = 0;
+    this.messageTracker.clear();
+    
+    // Clear from workspace state
+    this.context.workspaceState.update('chatHistory', []);
+    this.addWelcomeMessage();
+    this.refreshChat();
+  }
+
+  private refreshChat() {
+    if (!this._view) return;
+    this._view.webview.postMessage({
+      command: 'refreshChat',
+      history: this.chatHistory
+    });
+  }
+
+  public postMessage(message: string, type: 'system' | 'error' = 'system') {
+    this.addChatMessage(message, type);
+  }
+
+  public async executeDirectIntent(text: string): Promise<void> {
+    await this.handleUserMessageWithAdvancedDeduplication(text);
+  }
+
+  private getWebviewContent(): string {
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>AIDE Enhanced Chat</title>
+        <style>
+          body {
+            font-family: var(--vscode-font-family);
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-editor-background);
+            margin: 0;
+            padding: 10px;
+          }
+          
+          .chat-header {
+            text-align: center;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: var(--vscode-textLink-foreground);
+          }
+          
+          .chat-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid var(--vscode-widget-border);
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            background-color: var(--vscode-input-background);
+          }
+          
+          .message {
+            margin-bottom: 8px;
+            line-height: 1.4;
+          }
+          
+          .message.user {
+            color: var(--vscode-terminal-ansiGreen);
+          }
+          
+          .message.system {
+            color: var(--vscode-foreground);
+          }
+          
+          .message.error {
+            color: var(--vscode-errorForeground);
+          }
+          
+          .timestamp {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-right: 8px;
+          }
+          
+          .controls {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+          }
+          
+          .model-select {
+            flex: 1;
+            min-width: 120px;
+            padding: 6px;
+            border: 1px solid var(--vscode-widget-border);
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-foreground);
+            border-radius: 3px;
+          }
+          
+          .btn {
+            padding: 6px 12px;
+            border: 1px solid var(--vscode-button-border);
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+          }
+          
+          .btn:hover {
+            background-color: var(--vscode-button-hoverBackground);
+          }
+          
+          .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+          
+          .speech-controls {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+          }
+          
+          .input-area {
+            display: flex;
+            gap: 5px;
+          }
+          
+          .user-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid var(--vscode-widget-border);
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-foreground);
+            border-radius: 3px;
+          }
+          
+          .send-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--vscode-button-border);
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border-radius: 3px;
+            cursor: pointer;
+          }
+          
+          .send-btn:hover {
+            background-color: var(--vscode-button-hoverBackground);
+          }
+          
+          .recording {
+            background-color: var(--vscode-errorBackground) !important;
+            color: var(--vscode-errorForeground) !important;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="chat-header">🎯 AIDE Enhanced Chat</div>
+        
+        <div class="chat-container" id="chatContainer">
+          <div id="chatHistory"></div>
+        </div>
+        
+        <div class="controls">
+          <select id="modelSelect" class="model-select">
+            <option value="">Loading models...</option>
+          </select>
+          <button onclick="refreshModels()" class="btn">🔄 Refresh</button>
+        </div>
+        
+        <div class="speech-controls">
+          <button id="speechBtn" onclick="toggleSpeech()" class="btn" disabled>🎤 Speech</button>
+          <button onclick="ingestDocument()" class="btn">📄 Ingest</button>
+          <button onclick="clearChat()" class="btn">🗑️ Clear</button>
+        </div>
+        
+        <div class="input-area">
+          <input type="text" id="userInput" class="user-input" placeholder="Type your message..." />
+          <button onclick="sendMessage()" class="send-btn">Send</button>
+        </div>
+
+        <script>
+          const vscode = acquireVsCodeApi();
+          let isRecording = false;
+          let mediaRecorder = null;
+          let audioChunks = [];
+          let speechSupported = false;
+          
+          function refreshModels() {
+            console.log('🔄 Refresh models clicked');
+            vscode.postMessage({ command: 'refreshModels' });
+          }
+          
+          function clearChat() {
+            vscode.postMessage({ command: 'clearChat' });
+          }
+          
+          function ingestDocument() {
+            vscode.postMessage({ command: 'ingestDocument' });
+          }
+          
+          function sendMessage() {
+            const input = document.getElementById('userInput');
+            if (input.value.trim()) {
+              vscode.postMessage({ command: 'userMessage', text: input.value });
+              input.value = '';
+            }
+          }
+          
+          function switchModel() {
+            const select = document.getElementById('modelSelect');
+            if (select.value) {
+              vscode.postMessage({ command: 'switchModel', model: select.value });
+            }
+          }
+          
+          async function toggleSpeech() {
+            if (!speechSupported) {
+              console.log('Speech not supported');
+              return;
+            }
+            
+            if (!isRecording) {
+              await startRecording();
+            } else {
+              await stopRecording();
+            }
+          }
+          
+          async function startRecording() {
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              mediaRecorder = new MediaRecorder(stream);
+              audioChunks = [];
+              isRecording = true;
+              
+              const speechBtn = document.getElementById('speechBtn');
+              speechBtn.textContent = '🛑 Stop';
+              speechBtn.classList.add('recording');
+              
+              mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                  audioChunks.push(event.data);
+                }
+              };
+              
+              mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                await processSpeechInput(audioBlob);
+                stream.getTracks().forEach(track => track.stop());
+              };
+              
+              mediaRecorder.start();
+              
+            } catch (error) {
+              console.error('Failed to start recording:', error);
+            }
+          }
+          
+          async function stopRecording() {
+            if (mediaRecorder && isRecording) {
+              mediaRecorder.stop();
+              isRecording = false;
+              
+              const speechBtn = document.getElementById('speechBtn');
+              speechBtn.textContent = '🎤 Speech';
+              speechBtn.classList.remove('recording');
+            }
+          }
+          
+          async function processSpeechInput(audioBlob) {
+            try {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64Audio = reader.result.split(',')[1];
+                vscode.postMessage({ 
+                  command: 'processSpeech', 
+                  audioBase64: base64Audio 
+                });
+              };
+              reader.readAsDataURL(audioBlob);
+            } catch (error) {
+              console.error('Failed to process speech:', error);
+            }
+          }
+          
+          function playAudio(audioBase64) {
+            try {
+              const audio = new Audio('data:audio/wav;base64,' + audioBase64);
+              audio.play();
+            } catch (error) {
+              console.error('Failed to play audio:', error);
+            }
+          }
+          
+          // Handle Enter key in input
+          document.getElementById('userInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+              sendMessage();
+            }
+          });
+          
+          // Handle messages from extension
+          window.addEventListener('message', event => {
+            const message = event.data;
+            
+            switch (message.command) {
+              case 'updateModels':
+                updateModelDropdown(message.models, message.current);
+                break;
+              case 'appendMessage':
+                appendChatMessage(message.message, message.type, message.timestamp);
+                break;
+              case 'refreshChat':
+                refreshChatHistory(message.history);
+                break;
+              case 'modelSwitched':
+                updateCurrentModel(message.model);
+                break;
+              case 'speechSupport':
+                speechSupported = message.supported;
+                document.getElementById('speechBtn').disabled = !speechSupported;
+                break;
+              case 'playAudio':
+                playAudio(message.audioBase64);
+                break;
+              case 'startRecording':
+                startRecording();
+                break;
+              case 'stopRecording':
+                stopRecording();
+                break;
+            }
+          });
+          
+          function updateModelDropdown(models, current) {
+            const select = document.getElementById('modelSelect');
+            select.innerHTML = '';
+            
+            if (models.length === 0) {
+              select.innerHTML = '<option value="">No models available</option>';
+            } else {
+              models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model;
+                option.textContent = model;
+                if (model === current) {
+                  option.selected = true;
+                }
+                select.appendChild(option);
+              });
+            }
+            
+            select.onchange = switchModel;
+          }
+          
+          function appendChatMessage(message, type, timestamp) {
+            const chatHistory = document.getElementById('chatHistory');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = \`message \${type}\`;
+            messageDiv.innerHTML = \`
+              <span class="timestamp">\${timestamp}</span>
+              <span class="content">\${message}</span>
+            \`;
+            chatHistory.appendChild(messageDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+          }
+          
+          function refreshChatHistory(history) {
+            const chatHistory = document.getElementById('chatHistory');
+            chatHistory.innerHTML = '';
+            history.forEach(entry => {
+              appendChatMessage(entry.message, entry.type, entry.timestamp);
+            });
+          }
+          
+          function updateCurrentModel(model) {
+            const select = document.getElementById('modelSelect');
+            select.value = model;
+          }
+        </script>
+      </body>
+      </html>
+    `;
+  }
 }
