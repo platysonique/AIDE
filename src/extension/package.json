@@ -2,7 +2,7 @@
   "name": "aide",
   "displayName": "AIDE - Dynamic Intelligence Pipeline",
   "publisher": "platysonique",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "Dynamic AI-powered coding assistant with WebSocket tool registry and conversational intelligence",
   "repository": {
     "type": "git",
