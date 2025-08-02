@@ -1,4 +1,4 @@
-# Enhanced pixi.toml with OpenVINO Integration
+# Enhanced pixi.toml with OpenVINO Integration - CORRECTED VERSION
 # FULLY COMPATIBLE - Replace your current pixi.toml with this version
 
 [project]
@@ -39,9 +39,9 @@ huggingface_hub = "*"
 hf-transfer = "*"
 
 [pypi-dependencies]
-# OpenVINO integration - Latest versions for Intel Arc A770 support  
-openvino = ">=2025.2.0"
-openvino-genai = "*"
+# OpenVINO integration - STABLE VERSIONS for Intel Arc A770 support  
+openvino = "~=2024.3.0"
+openvino-genai = "~=2024.3.0"
 duckduckgo-search = "*"
 sentence-transformers = "*"
 loguru = "*"
